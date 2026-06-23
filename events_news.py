@@ -135,8 +135,9 @@ RSS_FEEDS = {
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def news_digest(max_per_feed: int = 6) -> pd.DataFrame:
-    """Pull headlines from market RSS feeds. Plain, fast, reliable."""
+def news_digest(max_per_feed: int = 8) -> pd.DataFrame:
+    """Pull headlines from market RSS feeds with parsed timestamps, newest first."""
+    from email.utils import parsedate_to_datetime
     rows = []
     for source, url in RSS_FEEDS.items():
         try:
@@ -149,9 +150,19 @@ def news_digest(max_per_feed: int = 6) -> pd.DataFrame:
                 title = it.findtext("title", "").strip()
                 link = it.findtext("link", "").strip()
                 pub = it.findtext("pubDate", "").strip()
+                dt = None
+                try:
+                    dt = parsedate_to_datetime(pub)
+                    if dt.tzinfo is not None:
+                        dt = dt.astimezone().replace(tzinfo=None)
+                except Exception:
+                    dt = None
                 if title:
                     rows.append({"Source": source, "Headline": title,
-                                 "Link": link, "Published": pub})
+                                 "Link": link, "dt": dt})
         except Exception:
             continue
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.sort_values("dt", ascending=False, na_position="last").reset_index(drop=True)
+    return df

@@ -1,7 +1,7 @@
 """
-SuperSwarna — Market Risk & Momentum Terminal (v3 restored)
-Section 1: Nifty/BankNifty risk ON-OFF (Minervini) + Supertrend ON-OFF
-Section 2: Chartink screener results
+SuperSwarna — Market Risk & Momentum Terminal (v5)
+Dark professional theme · purple #7C5CFC + seagreen #2EC4A0 + white text.
+Minimal: risk indicator always visible; everything else in collapsible sections.
 """
 import streamlit as st
 import pandas as pd
@@ -11,112 +11,122 @@ from datetime import datetime
 from data_layer import INDEX_TOKENS, connected
 from engine import index_risk
 from chartink import run_chartink_scan, DEFAULT_SCREENERS
-from market_web import (
-    gainers_losers, nifty50, advance_decline, nifty50_heatmap_yf
-)
-from events_news import (
-    results_today, events_window, news_digest
-)
+from market_web import gainers_losers, nifty50, advance_decline, nifty50_heatmap_yf
+from events_news import results_today, events_window, news_digest
 from banlist import fno_ban_mwpl
 
 st.set_page_config(page_title="SuperSwarna", page_icon="🪙",
                    layout="wide", initial_sidebar_state="collapsed")
 
-# ── E*TRADE-inspired light theme (purple #6633CC + green #99CC00 on white) ────
+# ── Dark professional theme: purple + seagreen + white ────────────────────────
 st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg:#FFFFFF; --panel:#FFFFFF; --panel2:#F5F4FA; --border:#E3E1ED;
-    --txt:#1C1A1E; --txt2:#6B6878; --green:#5C9A00; --red:#D32F2F;
-    --amber:#B8860B; --accent:#6633CC; --accent2:#99CC00;
+    --bg:#0B0E14; --panel:#12161F; --panel2:#1A1F2B; --border:#232A38;
+    --txt:#FFFFFF; --txt2:#9BA6B8; --txt3:#5C6678;
+    --purple:#7C5CFC; --purple-dim:#5B3FD6; --green:#2EC4A0; --green-dim:#1E8E74;
+    --red:#FF5C6C; --amber:#F5B23D;
   }
-  .stApp { background:var(--bg); color:var(--txt); }
+  .stApp { background:var(--bg); color:var(--txt);
+           font-family:'Inter',-apple-system,sans-serif; }
   #MainMenu, footer, header { visibility:hidden; }
-  .block-container { padding:1rem 1.5rem 3rem; max-width:1300px; }
+  .block-container { padding:1.2rem 1.6rem 3rem; max-width:1280px; }
   h1,h2,h3,h4 { color:var(--txt)!important; }
-  p, span, div, label { color:var(--txt); }
+  .mono { font-family:'JetBrains Mono',monospace; }
 
-  .brand { display:flex; align-items:baseline; gap:12px; }
-  .brand-name { font-size:30px; font-weight:800; letter-spacing:-0.5px; color:#6633CC; }
-  .brand-sub { font-size:12px; color:var(--txt2); letter-spacing:2px; text-transform:uppercase; }
-  .conn-pill { font-size:11px; padding:3px 10px; border-radius:999px; font-weight:600; }
-  .conn-live { background:rgba(92,154,0,0.14); color:var(--green); }
-  .conn-delayed { background:rgba(184,134,11,0.14); color:var(--amber); }
-  .section-eyebrow { font-size:11px; letter-spacing:3px; color:#6633CC;
-                     text-transform:uppercase; margin:26px 0 12px; font-weight:700;
-                     border-left:3px solid #99CC00; padding-left:10px; }
+  .topbar { display:flex; align-items:center; justify-content:space-between;
+            padding-bottom:16px; border-bottom:1px solid var(--border); margin-bottom:6px; }
+  .brand-name { font-size:30px; font-weight:800; letter-spacing:-0.5px; color:#FFFFFF; }
+  .brand-name .accent { color:var(--purple); }
+  .conn-pill { font-size:11px; padding:4px 12px; border-radius:999px; font-weight:600;
+               display:inline-flex; align-items:center; gap:6px; }
+  .conn-live { background:rgba(46,196,160,0.14); color:var(--green); }
+  .conn-off  { background:rgba(245,178,61,0.14); color:var(--amber); }
+  .dot { width:7px; height:7px; border-radius:50%; background:currentColor; }
+  .clock { font-size:12px; color:var(--txt2); font-family:'JetBrains Mono',monospace;
+           margin-left:12px; }
 
   .risk-card { background:var(--panel); border:1px solid var(--border);
-               border-radius:14px; padding:20px 22px;
-               box-shadow:0 1px 3px rgba(38,33,92,0.06); }
-  .risk-idx { font-size:15px; color:#6633CC; font-weight:700;
-              letter-spacing:1px; text-transform:uppercase; }
-  .risk-ltp { font-size:32px; font-weight:800; margin:6px 0 2px; color:var(--txt); }
-  .risk-chg { font-size:14px; font-weight:600; display:flex; align-items:center; gap:10px; }
-  .chg-chip { padding:2px 8px; border-radius:6px; font-size:13px; }
+               border-radius:16px; padding:22px 24px; position:relative; overflow:hidden; }
+  .risk-card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; }
+  .risk-card.pos::before { background:var(--green); }
+  .risk-card.neg::before { background:var(--red); }
+  .risk-idx { font-size:13px; color:var(--purple); font-weight:700;
+              letter-spacing:1.5px; text-transform:uppercase; }
+  .risk-ltp { font-size:36px; font-weight:800; margin:8px 0 2px; color:#FFFFFF;
+              font-family:'JetBrains Mono',monospace; letter-spacing:-1px; }
+  .risk-chg { font-size:15px; font-weight:700; display:flex; align-items:center; gap:10px;
+              font-family:'JetBrains Mono',monospace; }
+  .chg-chip { padding:2px 9px; border-radius:7px; font-size:13px; }
   .up { color:var(--green); } .down { color:var(--red); }
-  .chip-up { background:rgba(92,154,0,0.14); color:var(--green); }
-  .chip-down { background:rgba(211,47,47,0.12); color:var(--red); }
-  .switch-row { display:flex; gap:12px; margin-top:16px; }
-  .switch { flex:1; border-radius:10px; padding:12px 14px; text-align:center;
+  .chip-up { background:rgba(46,196,160,0.14); color:var(--green); }
+  .chip-down { background:rgba(255,92,108,0.14); color:var(--red); }
+  .switch-row { display:flex; gap:12px; margin-top:20px; }
+  .switch { flex:1; border-radius:12px; padding:13px 14px; text-align:center;
             border:1px solid var(--border); }
   .switch-label { font-size:10px; letter-spacing:1.5px; text-transform:uppercase;
-                  color:var(--txt2); margin-bottom:6px; }
-  .switch-val { font-size:18px; font-weight:800; letter-spacing:0.5px; }
-  .on  { background:rgba(92,154,0,0.1); border-color:rgba(92,154,0,0.45); }
+                  color:var(--txt3); margin-bottom:7px; font-weight:600; }
+  .switch-val { font-size:17px; font-weight:800; letter-spacing:0.5px;
+                font-family:'JetBrains Mono',monospace; }
+  .on  { background:rgba(46,196,160,0.1); border-color:rgba(46,196,160,0.4); }
   .on .switch-val { color:var(--green); }
-  .off { background:rgba(211,47,47,0.08); border-color:rgba(211,47,47,0.4); }
+  .off { background:rgba(255,92,108,0.1); border-color:rgba(255,92,108,0.4); }
   .off .switch-val { color:var(--red); }
 
-  [data-testid="stDataFrame"] { background:var(--panel); border:1px solid var(--border);
-        border-radius:10px; padding:4px; }
-  [data-testid="stDataFrame"] * { color:var(--txt)!important; }
+  /* Collapsible sections — bold, prominent, click to expand/collapse */
   div[data-testid="stExpander"] { background:var(--panel); border:1px solid var(--border);
-        border-radius:12px; box-shadow:0 1px 3px rgba(38,33,92,0.05); }
-  div[data-testid="stExpander"] summary { color:#6633CC!important; font-weight:600; }
-  .stSelectbox div[data-baseweb="select"] > div { background:#FFFFFF;
-        border-color:var(--border); color:var(--txt); }
-  .stButton button { background:#6633CC; color:#fff; border:none;
-        border-radius:8px; font-weight:700; transition:background .15s; }
-  .stButton button:hover { background:#5627D8; color:#fff; }
-  .stTextArea textarea { background:#FFFFFF; color:var(--txt); border-color:var(--border); }
+        border-radius:14px; margin-bottom:12px; }
+  div[data-testid="stExpander"] summary { padding:6px 4px; }
+  div[data-testid="stExpander"] summary p {
+        font-size:16px!important; font-weight:700!important; color:#FFFFFF!important;
+        letter-spacing:0.3px; }
+  div[data-testid="stExpander"] summary:hover p { color:var(--purple)!important; }
+  div[data-testid="stExpander"] svg { fill:var(--purple); }
+
+  [data-testid="stDataFrame"] { background:var(--panel2); border:1px solid var(--border);
+        border-radius:10px; padding:4px; }
+  [data-testid="stDataFrame"] * { color:var(--txt)!important;
+        font-family:'JetBrains Mono',monospace!important; font-size:13px!important; }
+  .stSelectbox div[data-baseweb="select"] > div { background:var(--panel2);
+        border-color:var(--border); color:var(--txt); border-radius:10px; }
+  .stButton button { background:var(--purple); color:#fff; border:none;
+        border-radius:9px; font-weight:700; transition:background .15s; }
+  .stButton button:hover { background:var(--purple-dim); color:#fff; }
+  .sec-head { font-size:11px; letter-spacing:3px; color:var(--txt3);
+              text-transform:uppercase; font-weight:700; margin:24px 0 12px; }
+  .news-meta { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--txt3); }
   hr { border-color:var(--border)!important; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Header ────────────────────────────────────────────────────────────────────
 live = connected()
-conn = ('<span class="conn-pill conn-live">● LIVE · Angel One</span>' if live
-        else '<span class="conn-pill conn-delayed">● Connect Angel One in Secrets</span>')
+conn = ('<span class="conn-pill conn-live"><span class="dot"></span>LIVE</span>' if live
+        else '<span class="conn-pill conn-off"><span class="dot"></span>OFFLINE</span>')
 st.markdown(f"""
-<div class="brand"><span class="brand-name">SuperSwarna</span>
-<span class="brand-sub">Market Risk & Momentum Terminal</span></div>
-<div style="margin:4px 0 2px">{conn}
-<span style="font-size:11px;color:#6B6878;margin-left:10px">
-{datetime.now().strftime('%d %b %Y · %H:%M')} IST</span></div>
+<div class="topbar">
+  <span class="brand-name">Super<span class="accent">Swarna</span></span>
+  <div>{conn}<span class="clock">{datetime.now().strftime('%d %b · %H:%M')} IST</span></div>
+</div>
 """, unsafe_allow_html=True)
 
-# ═══ SECTION 1 — RISK INDICATOR ════════════════════════════════════════════════
-st.markdown('<div class="section-eyebrow">01 · Risk Indicator — Minervini & Supertrend (10,3)</div>',
-            unsafe_allow_html=True)
-
+# ═══ RISK INDICATOR — always visible ═══════════════════════════════════════════
 cols = st.columns(2)
 risks = {}
 for i, idx in enumerate(INDEX_TOKENS.keys()):
     with cols[i]:
-        with st.spinner(f"Loading {idx}…"):
+        with st.spinner(""):
             rk = index_risk(idx)
         risks[idx] = rk
         if rk["minervini"] is None:
             st.markdown(f"""<div class="risk-card"><div class="risk-idx">{idx}</div>
-            <div class="risk-ltp">—</div><div style="color:#6B6878;font-size:13px">
-            Awaiting data — check Angel One connection</div></div>""",
-            unsafe_allow_html=True)
+            <div class="risk-ltp">—</div></div>""", unsafe_allow_html=True)
             continue
         ltp = rk["ltp"]; chg = rk["chg"]; pts = rk.get("chg_pts", 0)
         pos = chg >= 0
+        card_cls = "pos" if pos else "neg"
         arrow = "▲" if pos else "▼"
-        chg_cls = "up" if pos else "down"
         chip_cls = "chip-up" if pos else "chip-down"
         sign = "+" if pos else "−"
         mv_cls = "on" if rk["minervini"] else "off"
@@ -124,296 +134,165 @@ for i, idx in enumerate(INDEX_TOKENS.keys()):
         st_cls = "on" if rk["supertrend"] else "off"
         st_txt = "BUY" if rk["supertrend"] else "SELL"
         st.markdown(f"""
-        <div class="risk-card">
+        <div class="risk-card {card_cls}">
           <div class="risk-idx">{idx}</div>
           <div class="risk-ltp">{ltp:,.2f}</div>
-          <div class="risk-chg {chg_cls}">
+          <div class="risk-chg {('up' if pos else 'down')}">
             <span>{arrow} {sign}{abs(pts):,.2f}</span>
             <span class="chg-chip {chip_cls}">{sign}{abs(chg):.2f}%</span>
           </div>
           <div class="switch-row">
-            <div class="switch {mv_cls}">
-              <div class="switch-label">Minervini</div>
-              <div class="switch-val">{mv_txt}</div>
-            </div>
-            <div class="switch {st_cls}">
-              <div class="switch-label">Supertrend</div>
-              <div class="switch-val">{st_txt}</div>
-            </div>
+            <div class="switch {mv_cls}"><div class="switch-label">Minervini</div>
+              <div class="switch-val">{mv_txt}</div></div>
+            <div class="switch {st_cls}"><div class="switch-label">Supertrend</div>
+              <div class="switch-val">{st_txt}</div></div>
           </div>
         </div>""", unsafe_allow_html=True)
 
-with st.expander("📋 Minervini Trend Template — full criteria breakdown"):
-    st.caption("Each criterion carries equal weight (1 of 7). RISK ON only when all 7 pass. "
-               "Supertrend (10,3) is a separate confirmation signal.")
+st.markdown('<div class="sec-head">Sections</div>', unsafe_allow_html=True)
+
+# ═══ MINERVINI DETAIL (collapsible) ════════════════════════════════════════════
+with st.expander("Minervini Criteria"):
     for idx, rk in risks.items():
         if rk.get("checks"):
             met = rk["conditions_met"]; tot = rk["total_conditions"]
-            score_pct = met / tot * 100
-            bar_col = "#16C784" if met == tot else ("#F0B90B" if met >= 4 else "#EA3943")
-            st.markdown(f"""<div style="margin:10px 0 6px">
-              <div style="display:flex;justify-content:space-between;align-items:center">
+            pct = met / tot * 100
+            col = "#2EC4A0" if met == tot else ("#F5B23D" if met >= 4 else "#FF5C6C")
+            st.markdown(f"""<div style="margin:8px 0 6px">
+              <div style="display:flex;justify-content:space-between">
                 <span style="font-weight:700;font-size:15px">{idx}</span>
-                <span style="font-family:monospace;color:{bar_col};font-weight:700">
-                  {met}/{tot} criteria · {score_pct:.0f}%</span>
-              </div>
-              <div style="background:#E3E1ED;border-radius:4px;height:6px;margin-top:6px">
-                <div style="width:{score_pct}%;background:{bar_col};height:6px;
-                     border-radius:4px"></div></div></div>""", unsafe_allow_html=True)
+                <span style="font-family:monospace;color:{col};font-weight:700">{met}/{tot} · {pct:.0f}%</span></div>
+              <div style="background:#232A38;border-radius:4px;height:6px;margin-top:6px">
+                <div style="width:{pct}%;background:{col};height:6px;border-radius:4px"></div></div></div>""",
+                unsafe_allow_html=True)
             for c in rk["checks"]:
                 icon = "🟢" if c["pass"] else "🔴"
-                wt = c["weight"]
-                st.markdown(
-                    f"<div style='padding:3px 0 3px 4px;font-size:13px'>{icon} "
-                    f"<b>{c['label']}</b> "
-                    f"<span style='color:#6B6878'>· weight {wt}/7</span><br>"
-                    f"<span style='color:#6B6878;font-size:12px;margin-left:22px'>"
-                    f"{c['detail']}</span></div>",
+                st.markdown(f"<div style='padding:3px 0 3px 4px;font-size:13px'>{icon} "
+                    f"<b>{c['label']}</b> <span style='color:#5C6678'>· {c['weight']}/7</span><br>"
+                    f"<span style='color:#9BA6B8;font-size:12px;margin-left:22px'>{c['detail']}</span></div>",
                     unsafe_allow_html=True)
-            st.markdown("<hr style='border-color:#E3E1ED;margin:12px 0'>",
-                        unsafe_allow_html=True)
+            st.markdown("<hr style='border-color:#232A38;margin:10px 0'>", unsafe_allow_html=True)
 
-# ═══ SECTION 2 — MARKET INTERNALS ══════════════════════════════════════════════
-st.markdown('<div class="section-eyebrow">02 · Market Internals</div>',
-            unsafe_allow_html=True)
-st.caption("Advance/decline, gainers/losers (NSE) & Nifty 50 heatmap (Yahoo). "
-           "Zero Angel One load. Loads on demand, collapse anytime.")
-
-bc1, bc2 = st.columns([1, 1])
-with bc1:
-    if st.button("🔄 Load / refresh", key="intern_run", width="stretch"):
+# ═══ MARKET INTERNALS (collapsible) ════════════════════════════════════════════
+with st.expander("Market Internals"):
+    if st.button("Load", key="intern_run"):
         st.session_state["intern_done"] = True
-with bc2:
     if st.session_state.get("intern_done"):
-        if st.button("✕ Clear", key="intern_clear", width="stretch"):
-            st.session_state["intern_done"] = False
-            st.rerun()
+        with st.spinner(""):
+            n50 = nifty50(); ad = advance_decline(n50)
+            gl = gainers_losers(); heat = nifty50_heatmap_yf()
+        if ad["total"] == 0 and not heat.empty:
+            adv = int((heat["Chg %"] > 0).sum()); dec = int((heat["Chg %"] < 0).sum())
+            ad = {"adv": adv, "dec": dec, "total": len(heat)}
+        if ad["total"] > 0:
+            adv_pct = ad["adv"] / ad["total"] * 100
+            st.markdown(f"""<div style="background:#1A1F2B;border:1px solid #232A38;
+                border-radius:12px;padding:14px 18px;margin-bottom:14px">
+              <div style="display:flex;justify-content:space-between;font-size:13px;
+                color:#9BA6B8;margin-bottom:8px"><span>Advance / Decline</span>
+                <span><span style="color:#2EC4A0">{ad['adv']} adv</span> ·
+                <span style="color:#FF5C6C">{ad['dec']} dec</span></span></div>
+              <div style="display:flex;height:10px;border-radius:5px;overflow:hidden;background:#232A38">
+                <div style="width:{adv_pct}%;background:#2EC4A0"></div>
+                <div style="flex:1;background:#FF5C6C"></div></div></div>""",
+                unsafe_allow_html=True)
+        if not heat.empty:
+            cells = ""
+            for _, row in heat.iterrows():
+                v = row["Chg %"]
+                bg = "#1E8E74" if v > 1 else "#2EC4A0" if v > 0 else "#888780" if v == 0 else "#FF5C6C" if v > -1 else "#A33741"
+                cells += (f'<div style="background:{bg};border-radius:6px;padding:6px 4px;text-align:center">'
+                          f'<div style="font-size:9px;color:#fff;font-weight:600;overflow:hidden;'
+                          f'text-overflow:ellipsis;white-space:nowrap">{row["Symbol"]}</div>'
+                          f'<div style="font-size:10px;color:#fff">{v:+.1f}%</div></div>')
+            st.markdown(f'<div style="display:grid;grid-template-columns:repeat(10,1fr);'
+                        f'gap:4px;margin-bottom:14px">{cells}</div>', unsafe_allow_html=True)
+        g1, g2 = st.columns(2)
+        with g1:
+            st.markdown("<b style='color:#2EC4A0'>Top gainers</b>", unsafe_allow_html=True)
+            if not gl["gainers"].empty:
+                st.dataframe(gl["gainers"], width="stretch", hide_index=True, height=300,
+                    column_config={"Chg %": st.column_config.NumberColumn(format="%.2f%%")})
+        with g2:
+            st.markdown("<b style='color:#FF5C6C'>Top losers</b>", unsafe_allow_html=True)
+            if not gl["losers"].empty:
+                st.dataframe(gl["losers"], width="stretch", hide_index=True, height=300,
+                    column_config={"Chg %": st.column_config.NumberColumn(format="%.2f%%")})
 
-if st.session_state.get("intern_done"):
-    with st.spinner("Fetching market internals…"):
-        n50 = nifty50()
-        ad = advance_decline(n50)
-        gl = gainers_losers()
-        heat = nifty50_heatmap_yf()
-
-    nse_ok = not (n50.empty and gl["gainers"].empty)
-    with st.expander("Market internals", expanded=True):
-        if not nse_ok and heat.empty:
-            st.warning("No data returned. NSE can block cloud-server IPs (Streamlit's), "
-                       "and Yahoo may be rate-limited. Try refresh in a moment.")
-        else:
-            # ── Advance/Decline meter ──
-            if ad["total"] > 0:
-                adv, dec = ad["adv"], ad["dec"]
-                adv_pct = adv / ad["total"] * 100
-                st.markdown(f"""
-                <div style="background:#F5F4FA;border:1px solid #E3E1ED;border-radius:12px;
-                            padding:14px 18px;margin-bottom:14px">
-                  <div style="display:flex;justify-content:space-between;font-size:13px;
-                              color:#6B6878;margin-bottom:8px">
-                    <span>Nifty 50 Advance / Decline</span>
-                    <span><span style="color:#16C784">{adv} adv</span> ·
-                    <span style="color:#EA3943">{dec} dec</span></span>
-                  </div>
-                  <div style="display:flex;height:10px;border-radius:5px;overflow:hidden;
-                              background:#E3E1ED">
-                    <div style="width:{adv_pct}%;background:#16C784"></div>
-                    <div style="flex:1;background:#EA3943"></div>
-                  </div>
-                </div>""", unsafe_allow_html=True)
-            elif not heat.empty:
-                # Fallback A/D computed from Yahoo heatmap data
-                adv = int((heat["Chg %"] > 0).sum())
-                dec = int((heat["Chg %"] < 0).sum())
-                tot = len(heat)
-                adv_pct = adv / tot * 100 if tot else 0
-                st.markdown(f"""
-                <div style="background:#F5F4FA;border:1px solid #E3E1ED;border-radius:12px;
-                            padding:14px 18px;margin-bottom:14px">
-                  <div style="display:flex;justify-content:space-between;font-size:13px;
-                              color:#6B6878;margin-bottom:8px">
-                    <span>Nifty 50 Advance / Decline</span>
-                    <span><span style="color:#16C784">{adv} adv</span> ·
-                    <span style="color:#EA3943">{dec} dec</span></span>
-                  </div>
-                  <div style="display:flex;height:10px;border-radius:5px;overflow:hidden;
-                              background:#E3E1ED">
-                    <div style="width:{adv_pct}%;background:#16C784"></div>
-                    <div style="flex:1;background:#EA3943"></div>
-                  </div>
-                </div>""", unsafe_allow_html=True)
-
-            # ── Nifty 50 heatmap (Yahoo) ──
-            st.markdown("**Nifty 50 heatmap**")
-            if not heat.empty:
-                cells = ""
-                for _, row in heat.iterrows():
-                    v = row["Chg %"]
-                    if v > 1: bg = "#0E7A4A"
-                    elif v > 0: bg = "#16C784"
-                    elif v == 0: bg = "#B4B2A9"
-                    elif v > -1: bg = "#EA3943"
-                    else: bg = "#992E38"
-                    cells += (f'<div style="background:{bg};border-radius:6px;padding:6px 4px;'
-                              f'text-align:center"><div style="font-size:9px;color:#fff;'
-                              f'font-weight:600;overflow:hidden;text-overflow:ellipsis;'
-                              f'white-space:nowrap">{row["Symbol"]}</div>'
-                              f'<div style="font-size:10px;color:#fff">{v:+.1f}%</div></div>')
-                st.markdown(f'<div style="display:grid;grid-template-columns:repeat(10,1fr);'
-                            f'gap:4px;margin-bottom:16px">{cells}</div>', unsafe_allow_html=True)
-            else:
-                st.info("Heatmap data unavailable (Yahoo may be rate-limited — try refresh).")
-
-            # ── Gainers / Losers (NSE) ──
-            gc1, gc2 = st.columns(2)
-            with gc1:
-                st.markdown("**Top gainers**")
-                if not gl["gainers"].empty:
-                    st.dataframe(gl["gainers"], width="stretch", hide_index=True, height=300,
-                        column_config={"Chg %": st.column_config.NumberColumn(format="%.2f%%")})
-                else:
-                    st.caption("Gainers unavailable (NSE may block this server).")
-            with gc2:
-                st.markdown("**Top losers**")
-                if not gl["losers"].empty:
-                    st.dataframe(gl["losers"], width="stretch", hide_index=True, height=300,
-                        column_config={"Chg %": st.column_config.NumberColumn(format="%.2f%%")})
-                else:
-                    st.caption("Losers unavailable (NSE may block this server).")
-else:
-    st.info("Click **Load / refresh** to fetch breadth, movers & heatmap.")
-
-# ═══ SECTION 3 — CHARTINK SCREENER ═════════════════════════════════════════════
-st.markdown('<div class="section-eyebrow">03 · Chartink Screener</div>',
-            unsafe_allow_html=True)
-st.caption("Live results from your Chartink scans. Free Chartink data is delayed ~30-45 min.")
-
-ck1, ck2, ck3 = st.columns([2, 1, 1])
-with ck1:
-    screener_name = st.selectbox("Screener", list(DEFAULT_SCREENERS.keys()), key="ck_screener")
-with ck2:
-    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-    run_ck = st.button("🔄 Run scan", width="stretch", key="ck_run")
-with ck3:
-    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-    if st.session_state.get("ck_done"):
-        clear_ck = st.button("✕ Clear", width="stretch", key="ck_clear")
-        if clear_ck:
-            st.session_state["ck_done"] = False
-            st.session_state.pop("ck_result", None)
-            st.rerun()
-
-if run_ck:
-    clause = DEFAULT_SCREENERS[screener_name]
-    with st.spinner("Fetching from Chartink…"):
-        ck_df = run_chartink_scan(clause)
-    st.session_state["ck_done"] = True
-    st.session_state["ck_result"] = ck_df
-    st.session_state["ck_name"] = screener_name
-
-if st.session_state.get("ck_done"):
+# ═══ CHARTINK SCREENER (collapsible) ═══════════════════════════════════════════
+with st.expander("Screeners"):
+    sc1, sc2 = st.columns([3, 1])
+    with sc1:
+        screener_name = st.selectbox("", list(DEFAULT_SCREENERS.keys()),
+                                     key="ck_screener", label_visibility="collapsed")
+    with sc2:
+        run_ck = st.button("Run", key="ck_run", width="stretch")
+    if run_ck:
+        with st.spinner(""):
+            st.session_state["ck_result"] = run_chartink_scan(DEFAULT_SCREENERS[screener_name])
+            st.session_state["ck_name"] = screener_name
     ck_df = st.session_state.get("ck_result")
-    if ck_df is None:
-        st.info("No results.")
-    elif "error" in ck_df.columns:
-        st.error(ck_df["error"].iloc[0])
-    elif ck_df.empty:
-        st.info("No stocks matched this screener right now.")
-    else:
-        st.dataframe(ck_df, width="stretch", hide_index=True, height=480,
-            column_config={"Chg %": st.column_config.NumberColumn(format="%.2f%%")})
-        st.caption(f"{len(ck_df)} stocks matched “{st.session_state.get('ck_name','')}” · "
-                   "click any column header to sort.")
-else:
-    st.info("Pick a screener and click **Run scan**.")
+    if ck_df is not None:
+        if "error" in ck_df.columns:
+            st.error(ck_df["error"].iloc[0])
+        elif ck_df.empty:
+            st.caption("No matches.")
+        else:
+            st.dataframe(ck_df, width="stretch", hide_index=True, height=460,
+                column_config={"Chg %": st.column_config.NumberColumn(format="%.2f%%")})
+            st.caption(f"{len(ck_df)} matched · {st.session_state.get('ck_name','')}")
 
-# ═══ SECTION 4 — EVENTS, BAN LIST, RESULTS & NEWS ══════════════════════════════
-st.markdown('<div class="section-eyebrow">04 · Events, Ban List, Results & News</div>',
-            unsafe_allow_html=True)
-st.caption("Today's market events, F&O ban list, results due & news headlines. "
-           "Free sources (NSE + RSS). Loads on demand.")
-
-ec1, ec2 = st.columns([1, 1])
-with ec1:
-    if st.button("🔄 Load / refresh", key="ev_run", width="stretch"):
+# ═══ EVENTS & BAN LIST (collapsible) ═══════════════════════════════════════════
+with st.expander("Events & Ban List"):
+    if st.button("Load", key="ev_run"):
         st.session_state["ev_done"] = True
-with ec2:
     if st.session_state.get("ev_done"):
-        if st.button("✕ Clear", key="ev_clear", width="stretch"):
-            st.session_state["ev_done"] = False
-            st.rerun()
-
-if st.session_state.get("ev_done"):
-    with st.spinner("Fetching events, ban list, results & news…"):
-        evts = events_window(7)
-        ban = fno_ban_mwpl()
-        results = results_today()
-        news = news_digest(6)
-
-    with st.expander("Events & market triggers", expanded=True):
-        # ── Upcoming events (FOMC / MSCI) ──
-        st.markdown("**Upcoming events (7 days)**")
+        with st.spinner(""):
+            evts = events_window(7); ban = fno_ban_mwpl(); results = results_today()
         if not evts.empty:
             for _, e in evts.iterrows():
-                badge = "#F0B90B" if e["When"] == "TODAY" else "#3B82F6"
-                st.markdown(
-                    f"<div style='padding:5px 0'><span style='background:{badge};"
-                    f"color:#FFFFFF;font-weight:700;font-size:10px;padding:2px 8px;"
-                    f"border-radius:6px'>{e['When']}</span> "
-                    f"<b>{e['Date']} · {e['Type']}</b> — "
-                    f"<span style='color:#6B6878'>{e['Event']}</span></div>",
-                    unsafe_allow_html=True)
-        else:
-            st.caption("No FOMC/MSCI events in the next 7 days.")
-
-        # ── F&O ban list + possible entrants (by MWPL%) ──
+                badge = "#F5B23D" if e["When"] == "TODAY" else "#7C5CFC"
+                st.markdown(f"<div style='padding:5px 0'><span style='background:{badge};"
+                    f"color:#0B0E14;font-weight:700;font-size:10px;padding:2px 8px;"
+                    f"border-radius:6px'>{e['When']}</span> <b>{e['Date']} · {e['Type']}</b> "
+                    f"<span style='color:#9BA6B8'>— {e['Event']}</span></div>", unsafe_allow_html=True)
         asof = ban.get("asof", "")
-        st.markdown(f"<div style='height:10px'></div>**F&O ban list & possible entrants**"
-                    f"{(' · as of ' + asof) if asof else ''}",
-                    unsafe_allow_html=True)
-        bcol1, bcol2 = st.columns(2)
-        with bcol1:
-            st.markdown("<span style='color:#D32F2F;font-weight:700;font-size:13px'>"
-                        "● In ban (MWPL ≥ 95%)</span>", unsafe_allow_html=True)
+        b1, b2 = st.columns(2)
+        with b1:
+            st.markdown("<b style='color:#FF5C6C'>In ban (≥95%)</b>", unsafe_allow_html=True)
             if not ban["banned"].empty:
-                st.dataframe(ban["banned"], width="stretch", hide_index=True, height=260,
+                st.dataframe(ban["banned"], width="stretch", hide_index=True, height=240,
                     column_config={"MWPL %": st.column_config.NumberColumn(format="%.1f%%")})
-                st.caption(f"{len(ban['banned'])} stocks banned.")
             else:
-                st.caption("No stocks in ban, or source unavailable.")
-        with bcol2:
-            st.markdown("<span style='color:#B8860B;font-weight:700;font-size:13px'>"
-                        "● Possible entrants (80–95%)</span>", unsafe_allow_html=True)
+                st.caption("None / source unavailable.")
+        with b2:
+            st.markdown("<b style='color:#F5B23D'>Possible entrants (80–95%)</b>", unsafe_allow_html=True)
             if not ban["entrants"].empty:
-                st.dataframe(ban["entrants"], width="stretch", hide_index=True, height=260,
+                st.dataframe(ban["entrants"], width="stretch", hide_index=True, height=240,
                     column_config={"MWPL %": st.column_config.NumberColumn(format="%.1f%%")})
-                st.caption(f"{len(ban['entrants'])} stocks approaching ban.")
             else:
-                st.caption("None approaching, or source unavailable.")
-
-        # ── Results today ──
-        st.markdown("**Results / earnings due**")
+                st.caption("None / source unavailable.")
+        st.markdown("<b style='color:#7C5CFC'>Results due</b>", unsafe_allow_html=True)
         if not results.empty:
-            st.dataframe(results, width="stretch", hide_index=True, height=240)
+            st.dataframe(results, width="stretch", hide_index=True, height=220)
         else:
-            st.caption("No results found for today, or NSE endpoint unavailable.")
+            st.caption("None today / source unavailable.")
 
-    with st.expander("Market news headlines", expanded=True):
+# ═══ NEWS (collapsible) ════════════════════════════════════════════════════════
+with st.expander("Market News"):
+    if st.button("Load", key="news_run"):
+        st.session_state["news_done"] = True
+    if st.session_state.get("news_done"):
+        with st.spinner(""):
+            news = news_digest(8)
         if not news.empty:
-            for src in news["Source"].unique():
-                st.markdown(f"**{src}**")
-                sub = news[news["Source"] == src]
-                for _, n in sub.iterrows():
-                    link = n["Link"]
-                    if link:
-                        st.markdown(f"- [{n['Headline']}]({link})")
-                    else:
-                        st.markdown(f"- {n['Headline']}")
+            for _, n in news.iterrows():
+                dt = n["dt"]
+                stamp = dt.strftime("%d %b · %H:%M") if pd.notna(dt) else ""
+                link = n["Link"]
+                head = f"<a href='{link}' style='color:#FFFFFF;text-decoration:none'>{n['Headline']}</a>" if link else n["Headline"]
+                st.markdown(f"<div style='padding:7px 0;border-bottom:1px solid #232A38'>"
+                    f"<span class='news-meta'>{stamp} · {n['Source']}</span><br>{head}</div>",
+                    unsafe_allow_html=True)
         else:
-            st.caption("News feeds unavailable right now.")
-else:
-    st.info("Click **Load / refresh** to fetch events, ban list, results & news.")
-
-st.divider()
-st.caption("SuperSwarna · Minervini SEPA + Supertrend (Angel One) · Chartink (unofficial, delayed) · "
-           "NSE + RSS news · Not investment advice.")
+            st.caption("News unavailable.")
