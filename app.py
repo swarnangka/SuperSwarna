@@ -12,7 +12,7 @@ from data_layer import INDEX_TOKENS, connected
 from engine import index_risk
 from chartink import run_chartink_scan, DEFAULT_SCREENERS
 from market_web import (
-    gainers_losers, most_active, nifty50, advance_decline
+    gainers_losers, nifty50, advance_decline, nifty50_heatmap_yf
 )
 
 st.set_page_config(page_title="SuperSwarna", page_icon="🪙",
@@ -144,101 +144,112 @@ with st.expander("📋 Minervini condition detail"):
 # ═══ SECTION 2 — MARKET INTERNALS ══════════════════════════════════════════════
 st.markdown('<div class="section-eyebrow">02 · Market Internals</div>',
             unsafe_allow_html=True)
-st.caption("Advance/decline, gainers/losers, most active & Nifty 50 heatmap — "
-           "live from NSE India. Zero Angel One load. Loads on demand.")
+st.caption("Advance/decline, gainers/losers (NSE) & Nifty 50 heatmap (Yahoo). "
+           "Zero Angel One load. Loads on demand, collapse anytime.")
 
-if st.button("🔄 Load market internals", key="intern_run"):
-    st.session_state["intern_done"] = True
+bc1, bc2 = st.columns([1, 1])
+with bc1:
+    if st.button("🔄 Load / refresh", key="intern_run", width="stretch"):
+        st.session_state["intern_done"] = True
+with bc2:
+    if st.session_state.get("intern_done"):
+        if st.button("✕ Clear", key="intern_clear", width="stretch"):
+            st.session_state["intern_done"] = False
+            st.rerun()
 
 if st.session_state.get("intern_done"):
-    with st.spinner("Fetching from NSE India…"):
+    with st.spinner("Fetching market internals…"):
         n50 = nifty50()
         ad = advance_decline(n50)
         gl = gainers_losers()
-        ma = most_active()
+        heat = nifty50_heatmap_yf()
 
-    if n50.empty and gl["gainers"].empty and ma["volume"].empty:
-        st.warning("NSE returned no data. NSE sometimes blocks cloud-server IPs "
-                   "(like Streamlit's). Try again in a moment, or this source may be "
-                   "unavailable from the hosting region.")
-    else:
-        # ── Advance/Decline meter ──
-        if ad["total"] > 0:
-            adv, dec = ad["adv"], ad["dec"]
-            adv_pct = adv / ad["total"] * 100
-            st.markdown(f"""
-            <div style="background:#111A33;border:1px solid #1E2A4A;border-radius:12px;
-                        padding:14px 18px;margin-bottom:14px">
-              <div style="display:flex;justify-content:space-between;font-size:13px;
-                          color:#8A99B8;margin-bottom:8px">
-                <span>Nifty 50 Advance / Decline</span>
-                <span><span style="color:#16C784">{adv} adv</span> ·
-                <span style="color:#EA3943">{dec} dec</span></span>
-              </div>
-              <div style="display:flex;height:10px;border-radius:5px;overflow:hidden;
-                          background:#16213F">
-                <div style="width:{adv_pct}%;background:#16C784"></div>
-                <div style="flex:1;background:#EA3943"></div>
-              </div>
-            </div>""", unsafe_allow_html=True)
-
-        # ── Nifty 50 heatmap ──
-        st.markdown("**Nifty 50 heatmap**")
-        if not n50.empty:
-            cells = ""
-            for _, row in n50.iterrows():
-                v = row["Chg %"]
-                if v > 1: bg = "#0E7A4A"
-                elif v > 0: bg = "#16C784"
-                elif v == 0: bg = "#16213F"
-                elif v > -1: bg = "#EA3943"
-                else: bg = "#992E38"
-                cells += (f'<div style="background:{bg};border-radius:6px;padding:6px 4px;'
-                          f'text-align:center"><div style="font-size:9px;color:#fff;'
-                          f'font-weight:600;overflow:hidden;text-overflow:ellipsis;'
-                          f'white-space:nowrap">{row["Symbol"]}</div>'
-                          f'<div style="font-size:10px;color:#fff">{v:+.1f}%</div></div>')
-            st.markdown(f'<div style="display:grid;grid-template-columns:repeat(10,1fr);'
-                        f'gap:4px;margin-bottom:16px">{cells}</div>', unsafe_allow_html=True)
+    nse_ok = not (n50.empty and gl["gainers"].empty)
+    with st.expander("Market internals", expanded=True):
+        if not nse_ok and heat.empty:
+            st.warning("No data returned. NSE can block cloud-server IPs (Streamlit's), "
+                       "and Yahoo may be rate-limited. Try refresh in a moment.")
         else:
-            st.info("Heatmap data unavailable.")
+            # ── Advance/Decline meter ──
+            if ad["total"] > 0:
+                adv, dec = ad["adv"], ad["dec"]
+                adv_pct = adv / ad["total"] * 100
+                st.markdown(f"""
+                <div style="background:#111A33;border:1px solid #1E2A4A;border-radius:12px;
+                            padding:14px 18px;margin-bottom:14px">
+                  <div style="display:flex;justify-content:space-between;font-size:13px;
+                              color:#8A99B8;margin-bottom:8px">
+                    <span>Nifty 50 Advance / Decline</span>
+                    <span><span style="color:#16C784">{adv} adv</span> ·
+                    <span style="color:#EA3943">{dec} dec</span></span>
+                  </div>
+                  <div style="display:flex;height:10px;border-radius:5px;overflow:hidden;
+                              background:#16213F">
+                    <div style="width:{adv_pct}%;background:#16C784"></div>
+                    <div style="flex:1;background:#EA3943"></div>
+                  </div>
+                </div>""", unsafe_allow_html=True)
+            elif not heat.empty:
+                # Fallback A/D computed from Yahoo heatmap data
+                adv = int((heat["Chg %"] > 0).sum())
+                dec = int((heat["Chg %"] < 0).sum())
+                tot = len(heat)
+                adv_pct = adv / tot * 100 if tot else 0
+                st.markdown(f"""
+                <div style="background:#111A33;border:1px solid #1E2A4A;border-radius:12px;
+                            padding:14px 18px;margin-bottom:14px">
+                  <div style="display:flex;justify-content:space-between;font-size:13px;
+                              color:#8A99B8;margin-bottom:8px">
+                    <span>Nifty 50 Advance / Decline</span>
+                    <span><span style="color:#16C784">{adv} adv</span> ·
+                    <span style="color:#EA3943">{dec} dec</span></span>
+                  </div>
+                  <div style="display:flex;height:10px;border-radius:5px;overflow:hidden;
+                              background:#16213F">
+                    <div style="width:{adv_pct}%;background:#16C784"></div>
+                    <div style="flex:1;background:#EA3943"></div>
+                  </div>
+                </div>""", unsafe_allow_html=True)
 
-        # ── Gainers / Losers ──
-        gc1, gc2 = st.columns(2)
-        with gc1:
-            st.markdown("**Top gainers**")
-            if not gl["gainers"].empty:
-                st.dataframe(gl["gainers"], width="stretch", hide_index=True, height=300,
-                    column_config={"Chg %": st.column_config.NumberColumn(format="%.2f%%")})
+            # ── Nifty 50 heatmap (Yahoo) ──
+            st.markdown("**Nifty 50 heatmap**")
+            if not heat.empty:
+                cells = ""
+                for _, row in heat.iterrows():
+                    v = row["Chg %"]
+                    if v > 1: bg = "#0E7A4A"
+                    elif v > 0: bg = "#16C784"
+                    elif v == 0: bg = "#16213F"
+                    elif v > -1: bg = "#EA3943"
+                    else: bg = "#992E38"
+                    cells += (f'<div style="background:{bg};border-radius:6px;padding:6px 4px;'
+                              f'text-align:center"><div style="font-size:9px;color:#fff;'
+                              f'font-weight:600;overflow:hidden;text-overflow:ellipsis;'
+                              f'white-space:nowrap">{row["Symbol"]}</div>'
+                              f'<div style="font-size:10px;color:#fff">{v:+.1f}%</div></div>')
+                st.markdown(f'<div style="display:grid;grid-template-columns:repeat(10,1fr);'
+                            f'gap:4px;margin-bottom:16px">{cells}</div>', unsafe_allow_html=True)
             else:
-                st.caption("Gainers unavailable right now.")
-        with gc2:
-            st.markdown("**Top losers**")
-            if not gl["losers"].empty:
-                st.dataframe(gl["losers"], width="stretch", hide_index=True, height=300,
-                    column_config={"Chg %": st.column_config.NumberColumn(format="%.2f%%")})
-            else:
-                st.caption("Losers unavailable right now.")
+                st.info("Heatmap data unavailable (Yahoo may be rate-limited — try refresh).")
 
-        # ── Most active ──
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        mc1, mc2 = st.columns(2)
-        with mc1:
-            st.markdown("**Most active — by volume**")
-            if not ma["volume"].empty:
-                st.dataframe(ma["volume"], width="stretch", hide_index=True, height=300,
-                    column_config={"Chg %": st.column_config.NumberColumn(format="%.2f%%")})
-            else:
-                st.caption("Volume leaders unavailable right now.")
-        with mc2:
-            st.markdown("**Most active — by value**")
-            if not ma["value"].empty:
-                st.dataframe(ma["value"], width="stretch", hide_index=True, height=300,
-                    column_config={"Chg %": st.column_config.NumberColumn(format="%.2f%%")})
-            else:
-                st.caption("Value leaders unavailable right now.")
+            # ── Gainers / Losers (NSE) ──
+            gc1, gc2 = st.columns(2)
+            with gc1:
+                st.markdown("**Top gainers**")
+                if not gl["gainers"].empty:
+                    st.dataframe(gl["gainers"], width="stretch", hide_index=True, height=300,
+                        column_config={"Chg %": st.column_config.NumberColumn(format="%.2f%%")})
+                else:
+                    st.caption("Gainers unavailable (NSE may block this server).")
+            with gc2:
+                st.markdown("**Top losers**")
+                if not gl["losers"].empty:
+                    st.dataframe(gl["losers"], width="stretch", hide_index=True, height=300,
+                        column_config={"Chg %": st.column_config.NumberColumn(format="%.2f%%")})
+                else:
+                    st.caption("Losers unavailable (NSE may block this server).")
 else:
-    st.info("Click **Load market internals** to fetch breadth, movers & heatmap from NSE.")
+    st.info("Click **Load / refresh** to fetch breadth, movers & heatmap.")
 
 # ═══ SECTION 3 — CHARTINK SCREENER ═════════════════════════════════════════════
 st.markdown('<div class="section-eyebrow">03 · Chartink Screener</div>',

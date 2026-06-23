@@ -131,3 +131,37 @@ def advance_decline(n50: pd.DataFrame) -> dict:
     dec = int((n50["Chg %"] < 0).sum())
     unch = int((n50["Chg %"] == 0).sum())
     return {"adv": adv, "dec": dec, "unch": unch, "total": len(n50)}
+
+
+# ── Nifty 50 heatmap via Yahoo Finance batch (NSE endpoint blocks cloud IPs) ──
+NIFTY50_YF = [
+    "RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK","HINDUNILVR","ITC","SBIN",
+    "BHARTIARTL","KOTAKBANK","LT","AXISBANK","ASIANPAINT","MARUTI","TITAN",
+    "SUNPHARMA","BAJFINANCE","HCLTECH","WIPRO","ULTRACEMCO","NESTLEIND","NTPC",
+    "POWERGRID","TATAMOTORS","TATASTEEL","JSWSTEEL","ADANIENT","ADANIPORTS",
+    "COALINDIA","ONGC","GRASIM","HINDALCO","CIPLA","DRREDDY","BAJAJFINSV",
+    "BAJAJ-AUTO","HEROMOTOCO","EICHERMOT","BRITANNIA","TECHM","INDUSINDBK",
+    "BPCL","SHREECEM","APOLLOHOSP","TATACONSUM","DIVISLAB","SBILIFE","HDFCLIFE",
+    "LTIM","TRENT",
+]
+
+@st.cache_data(ttl=300, show_spinner=False)
+def nifty50_heatmap_yf() -> pd.DataFrame:
+    """Nifty 50 % change via one batched Yahoo Finance download."""
+    import yfinance as yf
+    syms = [s + ".NS" for s in NIFTY50_YF]
+    rows = []
+    try:
+        data = yf.download(syms, period="2d", auto_adjust=True,
+                           progress=False, group_by="ticker", threads=True)
+        for s in NIFTY50_YF:
+            try:
+                d = data[s + ".NS"]["Close"].dropna()
+                if len(d) >= 2:
+                    chg = (float(d.iloc[-1]) - float(d.iloc[-2])) / float(d.iloc[-2]) * 100
+                    rows.append({"Symbol": s, "Chg %": round(chg, 2)})
+            except Exception:
+                continue
+    except Exception:
+        return pd.DataFrame()
+    return pd.DataFrame(rows)
