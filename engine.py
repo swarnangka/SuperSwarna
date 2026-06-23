@@ -74,9 +74,10 @@ def index_risk(index_name: str) -> dict:
         ltp = price
     prev = float(df["Close"].iloc[-2])
     chg = (ltp - prev) / prev * 100
+    chg_pts = ltp - prev
 
     return {"index": index_name, "minervini": minervini_on, "supertrend": st_on,
-            "ltp": ltp, "chg": chg, "price": price, "ma200": ma200,
+            "ltp": ltp, "chg": chg, "chg_pts": chg_pts, "price": price, "ma200": ma200,
             "conditions_met": sum(conditions), "total_conditions": len(conditions)}
 
 
