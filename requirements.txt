@@ -1,0 +1,10 @@
+streamlit>=1.40.0
+yfinance>=0.2.50
+pandas>=2.2.3
+numpy>=2.0.0
+plotly>=5.24.0
+pillow>=11.0.0
+smartapi-python>=1.4.0
+pyotp>=2.9.0
+logzero>=1.7.0
+websocket-client>=1.7.0
