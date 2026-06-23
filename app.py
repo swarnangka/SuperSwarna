@@ -15,67 +15,72 @@ from market_web import (
     gainers_losers, nifty50, advance_decline, nifty50_heatmap_yf
 )
 from events_news import (
-    fno_ban, results_today, events_window, news_digest
+    results_today, events_window, news_digest
 )
+from banlist import fno_ban_mwpl
 
 st.set_page_config(page_title="SuperSwarna", page_icon="🪙",
                    layout="wide", initial_sidebar_state="collapsed")
 
-# ── Dark navy theme ───────────────────────────────────────────────────────────
+# ── E*TRADE-inspired light theme (purple #6633CC + green #99CC00 on white) ────
 st.markdown("""
 <style>
   :root {
-    --bg:#0A1124; --panel:#111A33; --panel2:#16213F; --border:#1E2A4A;
-    --txt:#E6ECF5; --txt2:#8A99B8; --green:#16C784; --red:#EA3943;
-    --amber:#F0B90B; --accent:#3B82F6;
+    --bg:#FFFFFF; --panel:#FFFFFF; --panel2:#F5F4FA; --border:#E3E1ED;
+    --txt:#1C1A1E; --txt2:#6B6878; --green:#5C9A00; --red:#D32F2F;
+    --amber:#B8860B; --accent:#6633CC; --accent2:#99CC00;
   }
   .stApp { background:var(--bg); color:var(--txt); }
   #MainMenu, footer, header { visibility:hidden; }
   .block-container { padding:1rem 1.5rem 3rem; max-width:1300px; }
   h1,h2,h3,h4 { color:var(--txt)!important; }
+  p, span, div, label { color:var(--txt); }
 
   .brand { display:flex; align-items:baseline; gap:12px; }
-  .brand-name { font-size:30px; font-weight:800; letter-spacing:-0.5px;
-                background:linear-gradient(90deg,#F0B90B,#3B82F6);
-                -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+  .brand-name { font-size:30px; font-weight:800; letter-spacing:-0.5px; color:#6633CC; }
   .brand-sub { font-size:12px; color:var(--txt2); letter-spacing:2px; text-transform:uppercase; }
   .conn-pill { font-size:11px; padding:3px 10px; border-radius:999px; font-weight:600; }
-  .conn-live { background:rgba(22,199,132,0.15); color:var(--green); }
-  .conn-delayed { background:rgba(240,185,11,0.15); color:var(--amber); }
-  .section-eyebrow { font-size:11px; letter-spacing:3px; color:var(--txt2);
-                     text-transform:uppercase; margin:26px 0 12px; font-weight:600; }
+  .conn-live { background:rgba(92,154,0,0.14); color:var(--green); }
+  .conn-delayed { background:rgba(184,134,11,0.14); color:var(--amber); }
+  .section-eyebrow { font-size:11px; letter-spacing:3px; color:#6633CC;
+                     text-transform:uppercase; margin:26px 0 12px; font-weight:700;
+                     border-left:3px solid #99CC00; padding-left:10px; }
 
   .risk-card { background:var(--panel); border:1px solid var(--border);
-               border-radius:16px; padding:20px 22px; }
-  .risk-idx { font-size:15px; color:var(--txt2); font-weight:600;
+               border-radius:14px; padding:20px 22px;
+               box-shadow:0 1px 3px rgba(38,33,92,0.06); }
+  .risk-idx { font-size:15px; color:#6633CC; font-weight:700;
               letter-spacing:1px; text-transform:uppercase; }
-  .risk-ltp { font-size:32px; font-weight:800; margin:6px 0 2px; }
+  .risk-ltp { font-size:32px; font-weight:800; margin:6px 0 2px; color:var(--txt); }
   .risk-chg { font-size:14px; font-weight:600; display:flex; align-items:center; gap:10px; }
   .chg-chip { padding:2px 8px; border-radius:6px; font-size:13px; }
   .up { color:var(--green); } .down { color:var(--red); }
-  .chip-up { background:rgba(22,199,132,0.14); color:var(--green); }
-  .chip-down { background:rgba(234,57,67,0.14); color:var(--red); }
+  .chip-up { background:rgba(92,154,0,0.14); color:var(--green); }
+  .chip-down { background:rgba(211,47,47,0.12); color:var(--red); }
   .switch-row { display:flex; gap:12px; margin-top:16px; }
-  .switch { flex:1; border-radius:12px; padding:12px 14px; text-align:center;
+  .switch { flex:1; border-radius:10px; padding:12px 14px; text-align:center;
             border:1px solid var(--border); }
   .switch-label { font-size:10px; letter-spacing:1.5px; text-transform:uppercase;
                   color:var(--txt2); margin-bottom:6px; }
   .switch-val { font-size:18px; font-weight:800; letter-spacing:0.5px; }
-  .on  { background:rgba(22,199,132,0.12); border-color:rgba(22,199,132,0.4); }
+  .on  { background:rgba(92,154,0,0.1); border-color:rgba(92,154,0,0.45); }
   .on .switch-val { color:var(--green); }
-  .off { background:rgba(234,57,67,0.12); border-color:rgba(234,57,67,0.4); }
+  .off { background:rgba(211,47,47,0.08); border-color:rgba(211,47,47,0.4); }
   .off .switch-val { color:var(--red); }
 
   [data-testid="stDataFrame"] { background:var(--panel); border:1px solid var(--border);
-        border-radius:12px; padding:4px; }
+        border-radius:10px; padding:4px; }
   [data-testid="stDataFrame"] * { color:var(--txt)!important; }
   div[data-testid="stExpander"] { background:var(--panel); border:1px solid var(--border);
-        border-radius:12px; }
-  .stSelectbox div[data-baseweb="select"] > div { background:var(--panel2);
+        border-radius:12px; box-shadow:0 1px 3px rgba(38,33,92,0.05); }
+  div[data-testid="stExpander"] summary { color:#6633CC!important; font-weight:600; }
+  .stSelectbox div[data-baseweb="select"] > div { background:#FFFFFF;
         border-color:var(--border); color:var(--txt); }
-  .stButton button { background:var(--accent); color:#fff; border:none;
-        border-radius:8px; font-weight:600; }
-  .stTextArea textarea { background:var(--panel2); color:var(--txt); border-color:var(--border); }
+  .stButton button { background:#6633CC; color:#fff; border:none;
+        border-radius:8px; font-weight:700; transition:background .15s; }
+  .stButton button:hover { background:#5627D8; color:#fff; }
+  .stTextArea textarea { background:#FFFFFF; color:var(--txt); border-color:var(--border); }
+  hr { border-color:var(--border)!important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -87,7 +92,7 @@ st.markdown(f"""
 <div class="brand"><span class="brand-name">SuperSwarna</span>
 <span class="brand-sub">Market Risk & Momentum Terminal</span></div>
 <div style="margin:4px 0 2px">{conn}
-<span style="font-size:11px;color:#8A99B8;margin-left:10px">
+<span style="font-size:11px;color:#6B6878;margin-left:10px">
 {datetime.now().strftime('%d %b %Y · %H:%M')} IST</span></div>
 """, unsafe_allow_html=True)
 
@@ -104,7 +109,7 @@ for i, idx in enumerate(INDEX_TOKENS.keys()):
         risks[idx] = rk
         if rk["minervini"] is None:
             st.markdown(f"""<div class="risk-card"><div class="risk-idx">{idx}</div>
-            <div class="risk-ltp">—</div><div style="color:#8A99B8;font-size:13px">
+            <div class="risk-ltp">—</div><div style="color:#6B6878;font-size:13px">
             Awaiting data — check Angel One connection</div></div>""",
             unsafe_allow_html=True)
             continue
@@ -152,7 +157,7 @@ with st.expander("📋 Minervini Trend Template — full criteria breakdown"):
                 <span style="font-family:monospace;color:{bar_col};font-weight:700">
                   {met}/{tot} criteria · {score_pct:.0f}%</span>
               </div>
-              <div style="background:#16213F;border-radius:4px;height:6px;margin-top:6px">
+              <div style="background:#E3E1ED;border-radius:4px;height:6px;margin-top:6px">
                 <div style="width:{score_pct}%;background:{bar_col};height:6px;
                      border-radius:4px"></div></div></div>""", unsafe_allow_html=True)
             for c in rk["checks"]:
@@ -161,11 +166,11 @@ with st.expander("📋 Minervini Trend Template — full criteria breakdown"):
                 st.markdown(
                     f"<div style='padding:3px 0 3px 4px;font-size:13px'>{icon} "
                     f"<b>{c['label']}</b> "
-                    f"<span style='color:#8A99B8'>· weight {wt}/7</span><br>"
-                    f"<span style='color:#8A99B8;font-size:12px;margin-left:22px'>"
+                    f"<span style='color:#6B6878'>· weight {wt}/7</span><br>"
+                    f"<span style='color:#6B6878;font-size:12px;margin-left:22px'>"
                     f"{c['detail']}</span></div>",
                     unsafe_allow_html=True)
-            st.markdown("<hr style='border-color:#1E2A4A;margin:12px 0'>",
+            st.markdown("<hr style='border-color:#E3E1ED;margin:12px 0'>",
                         unsafe_allow_html=True)
 
 # ═══ SECTION 2 — MARKET INTERNALS ══════════════════════════════════════════════
@@ -202,16 +207,16 @@ if st.session_state.get("intern_done"):
                 adv, dec = ad["adv"], ad["dec"]
                 adv_pct = adv / ad["total"] * 100
                 st.markdown(f"""
-                <div style="background:#111A33;border:1px solid #1E2A4A;border-radius:12px;
+                <div style="background:#F5F4FA;border:1px solid #E3E1ED;border-radius:12px;
                             padding:14px 18px;margin-bottom:14px">
                   <div style="display:flex;justify-content:space-between;font-size:13px;
-                              color:#8A99B8;margin-bottom:8px">
+                              color:#6B6878;margin-bottom:8px">
                     <span>Nifty 50 Advance / Decline</span>
                     <span><span style="color:#16C784">{adv} adv</span> ·
                     <span style="color:#EA3943">{dec} dec</span></span>
                   </div>
                   <div style="display:flex;height:10px;border-radius:5px;overflow:hidden;
-                              background:#16213F">
+                              background:#E3E1ED">
                     <div style="width:{adv_pct}%;background:#16C784"></div>
                     <div style="flex:1;background:#EA3943"></div>
                   </div>
@@ -223,16 +228,16 @@ if st.session_state.get("intern_done"):
                 tot = len(heat)
                 adv_pct = adv / tot * 100 if tot else 0
                 st.markdown(f"""
-                <div style="background:#111A33;border:1px solid #1E2A4A;border-radius:12px;
+                <div style="background:#F5F4FA;border:1px solid #E3E1ED;border-radius:12px;
                             padding:14px 18px;margin-bottom:14px">
                   <div style="display:flex;justify-content:space-between;font-size:13px;
-                              color:#8A99B8;margin-bottom:8px">
+                              color:#6B6878;margin-bottom:8px">
                     <span>Nifty 50 Advance / Decline</span>
                     <span><span style="color:#16C784">{adv} adv</span> ·
                     <span style="color:#EA3943">{dec} dec</span></span>
                   </div>
                   <div style="display:flex;height:10px;border-radius:5px;overflow:hidden;
-                              background:#16213F">
+                              background:#E3E1ED">
                     <div style="width:{adv_pct}%;background:#16C784"></div>
                     <div style="flex:1;background:#EA3943"></div>
                   </div>
@@ -246,7 +251,7 @@ if st.session_state.get("intern_done"):
                     v = row["Chg %"]
                     if v > 1: bg = "#0E7A4A"
                     elif v > 0: bg = "#16C784"
-                    elif v == 0: bg = "#16213F"
+                    elif v == 0: bg = "#B4B2A9"
                     elif v > -1: bg = "#EA3943"
                     else: bg = "#992E38"
                     cells += (f'<div style="background:{bg};border-radius:6px;padding:6px 4px;'
@@ -341,7 +346,7 @@ with ec2:
 if st.session_state.get("ev_done"):
     with st.spinner("Fetching events, ban list, results & news…"):
         evts = events_window(7)
-        ban = fno_ban()
+        ban = fno_ban_mwpl()
         results = results_today()
         news = news_digest(6)
 
@@ -353,21 +358,38 @@ if st.session_state.get("ev_done"):
                 badge = "#F0B90B" if e["When"] == "TODAY" else "#3B82F6"
                 st.markdown(
                     f"<div style='padding:5px 0'><span style='background:{badge};"
-                    f"color:#06101F;font-weight:700;font-size:10px;padding:2px 8px;"
+                    f"color:#FFFFFF;font-weight:700;font-size:10px;padding:2px 8px;"
                     f"border-radius:6px'>{e['When']}</span> "
                     f"<b>{e['Date']} · {e['Type']}</b> — "
-                    f"<span style='color:#8A99B8'>{e['Event']}</span></div>",
+                    f"<span style='color:#6B6878'>{e['Event']}</span></div>",
                     unsafe_allow_html=True)
         else:
             st.caption("No FOMC/MSCI events in the next 7 days.")
 
-        # ── F&O ban list ──
-        st.markdown("<div style='height:10px'></div>**F&O ban list (today)**",
+        # ── F&O ban list + possible entrants (by MWPL%) ──
+        asof = ban.get("asof", "")
+        st.markdown(f"<div style='height:10px'></div>**F&O ban list & possible entrants**"
+                    f"{(' · as of ' + asof) if asof else ''}",
                     unsafe_allow_html=True)
-        if not ban["banned"].empty:
-            st.dataframe(ban["banned"], width="stretch", hide_index=True, height=220)
-        else:
-            st.caption("Ban list unavailable (NSE may block this server) or no stocks banned.")
+        bcol1, bcol2 = st.columns(2)
+        with bcol1:
+            st.markdown("<span style='color:#D32F2F;font-weight:700;font-size:13px'>"
+                        "● In ban (MWPL ≥ 95%)</span>", unsafe_allow_html=True)
+            if not ban["banned"].empty:
+                st.dataframe(ban["banned"], width="stretch", hide_index=True, height=260,
+                    column_config={"MWPL %": st.column_config.NumberColumn(format="%.1f%%")})
+                st.caption(f"{len(ban['banned'])} stocks banned.")
+            else:
+                st.caption("No stocks in ban, or source unavailable.")
+        with bcol2:
+            st.markdown("<span style='color:#B8860B;font-weight:700;font-size:13px'>"
+                        "● Possible entrants (80–95%)</span>", unsafe_allow_html=True)
+            if not ban["entrants"].empty:
+                st.dataframe(ban["entrants"], width="stretch", hide_index=True, height=260,
+                    column_config={"MWPL %": st.column_config.NumberColumn(format="%.1f%%")})
+                st.caption(f"{len(ban['entrants'])} stocks approaching ban.")
+            else:
+                st.caption("None approaching, or source unavailable.")
 
         # ── Results today ──
         st.markdown("**Results / earnings due**")
