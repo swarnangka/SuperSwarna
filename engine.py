@@ -47,7 +47,7 @@ def index_risk(index_name: str) -> dict:
     df = add_mas(get_index_history(index_name))
     if df.empty or len(df) < 200:
         return {"index": index_name, "minervini": None, "supertrend": None,
-                "ltp": None, "chg": None}
+                "ltp": None, "chg": None, "checks": []}
     df = supertrend(df, 10, 3.0)
     r = df.iloc[-1]
     price = float(r["Close"])
@@ -55,16 +55,56 @@ def index_risk(index_name: str) -> dict:
     ma200_1m = float(r["MA200_1M"]) if not np.isnan(r["MA200_1M"]) else ma200
     lo52, hi52 = float(r["52WL"]), float(r["52WH"])
 
-    # Minervini trend template — ON only if ALL core conditions met
-    conditions = [
-        price > ma150 and price > ma200,
-        ma150 > ma200,
-        ma200 > ma200_1m,
-        ma50 > ma150 and ma50 > ma200,
-        price > ma50,
-        price >= lo52 * 1.30,
-        price >= hi52 * 0.75,
+    # Minervini Trend Template — each criterion labeled with actual values + weight.
+    # Equal weight (each 1 of 7). minervini_on = ON only if ALL pass.
+    checks = [
+        {
+            "label": "Price above 150 & 200 DMA",
+            "pass": price > ma150 and price > ma200,
+            "detail": f"Price ₹{price:,.0f} vs 150DMA ₹{ma150:,.0f}, 200DMA ₹{ma200:,.0f}",
+            "weight": 1,
+        },
+        {
+            "label": "150 DMA above 200 DMA",
+            "pass": ma150 > ma200,
+            "detail": f"150DMA ₹{ma150:,.0f} vs 200DMA ₹{ma200:,.0f}",
+            "weight": 1,
+        },
+        {
+            "label": "200 DMA trending up (1 month)",
+            "pass": ma200 > ma200_1m,
+            "detail": f"200DMA now ₹{ma200:,.0f} vs 1M ago ₹{ma200_1m:,.0f} "
+                      f"({(ma200-ma200_1m)/ma200_1m*100:+.2f}%)",
+            "weight": 1,
+        },
+        {
+            "label": "50 DMA above 150 & 200 DMA",
+            "pass": ma50 > ma150 and ma50 > ma200,
+            "detail": f"50DMA ₹{ma50:,.0f} vs 150DMA ₹{ma150:,.0f}, 200DMA ₹{ma200:,.0f}",
+            "weight": 1,
+        },
+        {
+            "label": "Price above 50 DMA",
+            "pass": price > ma50,
+            "detail": f"Price ₹{price:,.0f} vs 50DMA ₹{ma50:,.0f}",
+            "weight": 1,
+        },
+        {
+            "label": "≥30% above 52-week low",
+            "pass": price >= lo52 * 1.30,
+            "detail": f"Price ₹{price:,.0f} is {(price-lo52)/lo52*100:+.0f}% above "
+                      f"52W low ₹{lo52:,.0f} (need ≥30%)",
+            "weight": 1,
+        },
+        {
+            "label": "Within 25% of 52-week high",
+            "pass": price >= hi52 * 0.75,
+            "detail": f"Price ₹{price:,.0f} is {(price-hi52)/hi52*100:+.0f}% from "
+                      f"52W high ₹{hi52:,.0f} (need ≥−25%)",
+            "weight": 1,
+        },
     ]
+    conditions = [c["pass"] for c in checks]
     minervini_on = all(conditions)
     st_on = int(r["ST_dir"]) == 1
 
@@ -78,6 +118,7 @@ def index_risk(index_name: str) -> dict:
 
     return {"index": index_name, "minervini": minervini_on, "supertrend": st_on,
             "ltp": ltp, "chg": chg, "chg_pts": chg_pts, "price": price, "ma200": ma200,
+            "checks": checks,
             "conditions_met": sum(conditions), "total_conditions": len(conditions)}
 
 
