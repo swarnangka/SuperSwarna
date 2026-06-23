@@ -20,8 +20,8 @@ st.set_page_config(page_title="SuperSwarna", page_icon="🪙",
 
 # ── Dark professional theme: purple + seagreen + white ────────────────────────
 st.markdown("""
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
   :root {
     --bg:#0B0E14; --panel:#12161F; --panel2:#1A1F2B; --border:#232A38;
     --txt:#FFFFFF; --txt2:#9BA6B8; --txt3:#5C6678;
@@ -104,12 +104,11 @@ st.markdown("""
 live = connected()
 conn = ('<span class="conn-pill conn-live"><span class="dot"></span>LIVE</span>' if live
         else '<span class="conn-pill conn-off"><span class="dot"></span>OFFLINE</span>')
-st.markdown(f"""
-<div class="topbar">
-  <span class="brand-name">Super<span class="accent">Swarna</span></span>
-  <div>{conn}<span class="clock">{datetime.now().strftime('%d %b · %H:%M')} IST</span></div>
-</div>
-""", unsafe_allow_html=True)
+st.markdown(
+f'<div class="topbar">'
+f'<span class="brand-name">Super<span class="accent">Swarna</span></span>'
+f'<div>{conn}<span class="clock">{datetime.now().strftime("%d %b · %H:%M")} IST</span></div>'
+f'</div>', unsafe_allow_html=True)
 
 # ═══ RISK INDICATOR — always visible ═══════════════════════════════════════════
 cols = st.columns(2)
@@ -120,8 +119,9 @@ for i, idx in enumerate(INDEX_TOKENS.keys()):
             rk = index_risk(idx)
         risks[idx] = rk
         if rk["minervini"] is None:
-            st.markdown(f"""<div class="risk-card"><div class="risk-idx">{idx}</div>
-            <div class="risk-ltp">—</div></div>""", unsafe_allow_html=True)
+            st.markdown(
+f'<div class="risk-card"><div class="risk-idx">{idx}</div>'
+f'<div class="risk-ltp">—</div></div>', unsafe_allow_html=True)
             continue
         ltp = rk["ltp"]; chg = rk["chg"]; pts = rk.get("chg_pts", 0)
         pos = chg >= 0
@@ -133,21 +133,19 @@ for i, idx in enumerate(INDEX_TOKENS.keys()):
         mv_txt = "RISK ON" if rk["minervini"] else "RISK OFF"
         st_cls = "on" if rk["supertrend"] else "off"
         st_txt = "BUY" if rk["supertrend"] else "SELL"
-        st.markdown(f"""
-        <div class="risk-card {card_cls}">
-          <div class="risk-idx">{idx}</div>
-          <div class="risk-ltp">{ltp:,.2f}</div>
-          <div class="risk-chg {('up' if pos else 'down')}">
-            <span>{arrow} {sign}{abs(pts):,.2f}</span>
-            <span class="chg-chip {chip_cls}">{sign}{abs(chg):.2f}%</span>
-          </div>
-          <div class="switch-row">
-            <div class="switch {mv_cls}"><div class="switch-label">Swarna</div>
-              <div class="switch-val">{mv_txt}</div></div>
-            <div class="switch {st_cls}"><div class="switch-label">Supertrend</div>
-              <div class="switch-val">{st_txt}</div></div>
-          </div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(
+f'<div class="risk-card {card_cls}">'
+f'<div class="risk-idx">{idx}</div>'
+f'<div class="risk-ltp">{ltp:,.2f}</div>'
+f'<div class="risk-chg {("up" if pos else "down")}">'
+f'<span>{arrow} {sign}{abs(pts):,.2f}</span>'
+f'<span class="chg-chip {chip_cls}">{sign}{abs(chg):.2f}%</span></div>'
+f'<div class="switch-row">'
+f'<div class="switch {mv_cls}"><div class="switch-label">Swarna</div>'
+f'<div class="switch-val">{mv_txt}</div></div>'
+f'<div class="switch {st_cls}"><div class="switch-label">Supertrend</div>'
+f'<div class="switch-val">{st_txt}</div></div>'
+f'</div></div>', unsafe_allow_html=True)
 
 st.markdown('<div class="sec-head">Sections</div>', unsafe_allow_html=True)
 
@@ -158,12 +156,13 @@ with st.expander("Swarna Criteria"):
             met = rk["conditions_met"]; tot = rk["total_conditions"]
             pct = met / tot * 100
             col = "#2EC4A0" if met == tot else ("#F5B23D" if met >= 4 else "#FF5C6C")
-            st.markdown(f"""<div style="margin:8px 0 6px">
-              <div style="display:flex;justify-content:space-between">
-                <span style="font-weight:700;font-size:15px">{idx}</span>
-                <span style="font-family:monospace;color:{col};font-weight:700">{met}/{tot} · {pct:.0f}%</span></div>
-              <div style="background:#232A38;border-radius:4px;height:6px;margin-top:6px">
-                <div style="width:{pct}%;background:{col};height:6px;border-radius:4px"></div></div></div>""",
+            st.markdown(
+f'<div style="margin:8px 0 6px">'
+f'<div style="display:flex;justify-content:space-between">'
+f'<span style="font-weight:700;font-size:15px">{idx}</span>'
+f'<span style="font-family:monospace;color:{col};font-weight:700">{met}/{tot} · {pct:.0f}%</span></div>'
+f'<div style="background:#232A38;border-radius:4px;height:6px;margin-top:6px">'
+f'<div style="width:{pct}%;background:{col};height:6px;border-radius:4px"></div></div></div>',
                 unsafe_allow_html=True)
             for c in rk["checks"]:
                 icon = "🟢" if c["pass"] else "🔴"
@@ -186,15 +185,15 @@ with st.expander("Market Internals"):
             ad = {"adv": adv, "dec": dec, "total": len(heat)}
         if ad["total"] > 0:
             adv_pct = ad["adv"] / ad["total"] * 100
-            st.markdown(f"""<div style="background:#1A1F2B;border:1px solid #232A38;
-                border-radius:12px;padding:14px 18px;margin-bottom:14px">
-              <div style="display:flex;justify-content:space-between;font-size:13px;
-                color:#9BA6B8;margin-bottom:8px"><span>Advance / Decline</span>
-                <span><span style="color:#2EC4A0">{ad['adv']} adv</span> ·
-                <span style="color:#FF5C6C">{ad['dec']} dec</span></span></div>
-              <div style="display:flex;height:10px;border-radius:5px;overflow:hidden;background:#232A38">
-                <div style="width:{adv_pct}%;background:#2EC4A0"></div>
-                <div style="flex:1;background:#FF5C6C"></div></div></div>""",
+            st.markdown(
+f'<div style="background:#1A1F2B;border:1px solid #232A38;border-radius:12px;padding:14px 18px;margin-bottom:14px">'
+f'<div style="display:flex;justify-content:space-between;font-size:13px;color:#9BA6B8;margin-bottom:8px">'
+f'<span>Advance / Decline</span>'
+f'<span><span style="color:#2EC4A0">{ad["adv"]} adv</span> · '
+f'<span style="color:#FF5C6C">{ad["dec"]} dec</span></span></div>'
+f'<div style="display:flex;height:10px;border-radius:5px;overflow:hidden;background:#232A38">'
+f'<div style="width:{adv_pct}%;background:#2EC4A0"></div>'
+f'<div style="flex:1;background:#FF5C6C"></div></div></div>',
                 unsafe_allow_html=True)
         if not heat.empty:
             cells = ""
