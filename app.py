@@ -7,13 +7,15 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import plotly.graph_objects as go
+import plotly.express as px
 
 from data_layer import (
     INDEX_TOKENS, get_index_ltp, smartapi_connected, fetch_yf
 )
 from engine import (
-    build_index_card, scan_fno_table, scan_52w_high, sector_strength,
-    FNO_STOCKS, minervini_score
+    build_index_card, build_all_index_cards, scan_fno_table, scan_52w_high,
+    sector_strength, FNO_STOCKS, minervini_score
 )
 
 st.set_page_config(page_title="SuperSwarna", page_icon="🪙",
@@ -97,13 +99,12 @@ st.markdown(f"""
 st.markdown('<div class="section-eyebrow">01 · Risk Indicator — Minervini Template + Supertrend (10,3)</div>', unsafe_allow_html=True)
 
 cols = st.columns(4)
-cards = {}
+with st.spinner("Loading indices…"):
+    cards = build_all_index_cards()
 for i, (idx_name, info) in enumerate(INDEX_TOKENS.items()):
     with cols[i]:
-        with st.spinner(f"Loading {idx_name}…"):
-            card = build_index_card(idx_name, info["yf"])
-            ltp = get_index_ltp(idx_name)
-        cards[idx_name] = card
+        card = cards[idx_name]
+        ltp = get_index_ltp(idx_name)
         risk = card.get("risk", "NO DATA")
         risk_cls = "risk-" + risk.replace(" ", "").replace("NODATA", "NODATA")
         if risk == "NO DATA":
@@ -171,7 +172,6 @@ with left:
                 "this pulls from NSE's daily participant report — see setup guide.)")
     else:
         # Placeholder illustrative trend so layout is visible before data wiring
-        import plotly.graph_objects as go
         days = pd.date_range(end=datetime.now(), periods=15, freq="B")
         demo = pd.DataFrame({
             "FII": np.cumsum(np.random.randn(15) * 8000),
@@ -196,7 +196,6 @@ with right:
     with st.spinner("Computing sector strength…"):
         sec = sector_strength(period_map[period_label])
     if not sec.empty:
-        import plotly.express as px
         sec_sorted = sec.sort_values("Return %")
         colors = ["#16C784" if v >= 0 else "#EA3943" for v in sec_sorted["Return %"]]
         fig2 = go.Figure(go.Bar(

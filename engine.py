@@ -26,17 +26,56 @@ FNO_STOCKS = [
 SECTOR_INDICES = {
     "Nifty IT":        "^CNXIT",
     "Nifty Bank":      "^NSEBANK",
-    "Nifty Auto":      "NIFTY_AUTO.NS",
     "Nifty Pharma":    "^CNXPHARMA",
     "Nifty FMCG":      "^CNXFMCG",
     "Nifty Metal":     "^CNXMETAL",
     "Nifty Energy":    "^CNXENERGY",
     "Nifty Realty":    "^CNXREALTY",
-    "Nifty Fin Svc":   "NIFTY_FIN_SERVICE.NS",
     "Nifty Media":     "^CNXMEDIA",
     "Nifty PSU Bank":  "^CNXPSUBANK",
     "Nifty Infra":     "^CNXINFRA",
+    "Nifty Auto":      "^CNXAUTO",
+    "Nifty Fin Svc":   "NIFTY_FIN_SERVICE.NS",
 }
+
+
+import streamlit as st
+import time
+
+@st.cache_data(ttl=900, show_spinner=False)
+def batch_download(symbols: tuple, period: str = "2y") -> dict:
+    """Download many tickers in ONE yfinance call to avoid rate limits.
+    Returns dict {symbol: DataFrame}."""
+    import yfinance as yf
+    out = {}
+    syms = list(symbols)
+    # chunk into groups of 30 to keep each request reasonable
+    for i in range(0, len(syms), 30):
+        chunk = syms[i:i+30]
+        for attempt in range(3):
+            try:
+                data = yf.download(chunk, period=period, auto_adjust=True,
+                                   progress=False, group_by="ticker", threads=True)
+                if data is not None and not data.empty:
+                    for s in chunk:
+                        try:
+                            if len(chunk) == 1:
+                                d = data
+                            else:
+                                d = data[s]
+                            d = d[["Open", "High", "Low", "Close", "Volume"]].dropna()
+                            if not d.empty:
+                                out[s] = d
+                        except Exception:
+                            continue
+                    break
+            except Exception as e:
+                if "Too Many Requests" in str(e) or "Rate limited" in str(e):
+                    time.sleep(2 * (attempt + 1))
+                    continue
+            time.sleep(0.5)
+        time.sleep(0.5)  # gap between chunks
+    return out
 
 
 def minervini_score(df: pd.DataFrame, st_dir: int) -> dict:
@@ -85,14 +124,16 @@ def minervini_score(df: pd.DataFrame, st_dir: int) -> dict:
             "ma50": ma50, "ma200": ma200, "hi52": hi52}
 
 
-def build_index_card(index_name: str, yf_symbol: str) -> dict:
-    df = add_mas(fetch_yf(yf_symbol, period="2y"))
+def build_index_card(index_name: str, yf_symbol: str, df=None) -> dict:
+    if df is None:
+        df = fetch_yf(yf_symbol, period="2y")
+    df = add_mas(df)
     df = supertrend(df, 10, 3.0)
     st_dir = int(df["ST_dir"].iloc[-1]) if not df.empty else 0
     mv = minervini_score(df, st_dir)
     mv["st_dir"] = st_dir
     mv["index"] = index_name
-    if not df.empty:
+    if not df.empty and len(df) >= 2:
         prev = float(df["Close"].iloc[-2])
         last = float(df["Close"].iloc[-1])
         mv["chg_pct"] = (last - prev) / prev * 100
@@ -101,14 +142,28 @@ def build_index_card(index_name: str, yf_symbol: str) -> dict:
     return mv
 
 
+def build_all_index_cards() -> dict:
+    """Batch-fetch all 4 indices in one call to avoid rate limits."""
+    from data_layer import INDEX_TOKENS
+    syms = tuple(info["yf"] for info in INDEX_TOKENS.values())
+    data = batch_download(syms, period="2y")
+    cards = {}
+    for idx_name, info in INDEX_TOKENS.items():
+        d = data.get(info["yf"], pd.DataFrame())
+        cards[idx_name] = build_index_card(idx_name, info["yf"], df=d)
+    return cards
+
+
 def scan_fno_table(stocks: list, st_factor: float = 2.0) -> pd.DataFrame:
     """Build the F&O screener table. st_factor configurable (default 10,2)."""
+    symbols = tuple(s + ".NS" for s in stocks)
+    data = batch_download(symbols, period="2y")
     rows = []
     for sym in stocks:
+        d = data.get(sym + ".NS")
+        if d is None or len(d) < 60:
+            continue
         try:
-            d = fetch_yf(sym + ".NS", period="2y")
-            if d.empty or len(d) < 60:
-                continue
             d = add_mas(d)
             d = supertrend(d, 10, st_factor)
             last = float(d["Close"].iloc[-1])
@@ -137,12 +192,14 @@ def scan_fno_table(stocks: list, st_factor: float = 2.0) -> pd.DataFrame:
 
 def scan_52w_high(stocks: list, threshold_pct: float = 5.0) -> pd.DataFrame:
     """Stocks within threshold_pct of their 52-week high."""
+    symbols = tuple(s + ".NS" for s in stocks)
+    data = batch_download(symbols, period="2y")
     rows = []
     for sym in stocks:
+        d = data.get(sym + ".NS")
+        if d is None or len(d) < 60:
+            continue
         try:
-            d = fetch_yf(sym + ".NS", period="2y")
-            if d.empty or len(d) < 60:
-                continue
             d = add_mas(d)
             last = float(d["Close"].iloc[-1])
             hi52 = float(d["52WH"].iloc[-1])
@@ -166,12 +223,14 @@ def scan_52w_high(stocks: list, threshold_pct: float = 5.0) -> pd.DataFrame:
 
 def sector_strength(period_days: int = 1) -> pd.DataFrame:
     """Relative strength of sector indices over a lookback window."""
+    symbols = tuple(SECTOR_INDICES.values())
+    data = batch_download(symbols, period="6mo")
     rows = []
     for name, sym in SECTOR_INDICES.items():
+        d = data.get(sym)
+        if d is None or len(d) < period_days + 1:
+            continue
         try:
-            d = fetch_yf(sym, period="6mo")
-            if d.empty or len(d) < period_days + 1:
-                continue
             last = float(d["Close"].iloc[-1])
             past = float(d["Close"].iloc[-(period_days + 1)])
             ret = (last - past) / past * 100

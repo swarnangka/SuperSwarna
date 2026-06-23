@@ -59,16 +59,20 @@ def smartapi_connected() -> bool:
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_yf(symbol: str, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
     import yfinance as yf
-    try:
-        df = yf.download(symbol, period=period, interval=interval,
-                         auto_adjust=True, progress=False)
-        if df.empty:
-            return pd.DataFrame()
-        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-        keep = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in df.columns]
-        return df[keep].dropna()
-    except Exception:
-        return pd.DataFrame()
+    for attempt in range(3):
+        try:
+            df = yf.download(symbol, period=period, interval=interval,
+                             auto_adjust=True, progress=False, threads=False)
+            if df is not None and not df.empty:
+                df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+                keep = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in df.columns]
+                return df[keep].dropna()
+        except Exception as e:
+            if "Too Many Requests" in str(e) or "Rate limited" in str(e):
+                time.sleep(1.5 * (attempt + 1))
+                continue
+        time.sleep(0.3)
+    return pd.DataFrame()
 
 
 @st.cache_data(ttl=60, show_spinner=False)
