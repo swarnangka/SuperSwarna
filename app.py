@@ -142,7 +142,7 @@ for i, idx in enumerate(INDEX_TOKENS.keys()):
             <span class="chg-chip {chip_cls}">{sign}{abs(chg):.2f}%</span>
           </div>
           <div class="switch-row">
-            <div class="switch {mv_cls}"><div class="switch-label">Minervini</div>
+            <div class="switch {mv_cls}"><div class="switch-label">Swarna</div>
               <div class="switch-val">{mv_txt}</div></div>
             <div class="switch {st_cls}"><div class="switch-label">Supertrend</div>
               <div class="switch-val">{st_txt}</div></div>
@@ -152,7 +152,7 @@ for i, idx in enumerate(INDEX_TOKENS.keys()):
 st.markdown('<div class="sec-head">Sections</div>', unsafe_allow_html=True)
 
 # ═══ MINERVINI DETAIL (collapsible) ════════════════════════════════════════════
-with st.expander("Minervini Criteria"):
+with st.expander("Swarna Criteria"):
     for idx, rk in risks.items():
         if rk.get("checks"):
             met = rk["conditions_met"]; tot = rk["total_conditions"]
@@ -223,7 +223,7 @@ with st.expander("Market Internals"):
 with st.expander("Screeners"):
     sc1, sc2 = st.columns([3, 1])
     with sc1:
-        screener_name = st.selectbox("", list(DEFAULT_SCREENERS.keys()),
+        screener_name = st.selectbox("Screener", list(DEFAULT_SCREENERS.keys()),
                                      key="ck_screener", label_visibility="collapsed")
     with sc2:
         run_ck = st.button("Run", key="ck_run", width="stretch")
