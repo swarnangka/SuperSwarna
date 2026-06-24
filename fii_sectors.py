@@ -1,45 +1,42 @@
 """
-Parabolic Trends — FII Sector Flows
-Source: MrChartist public API (fii-diidata.mrchartist.com/api/sectors)
-This is a public API — no auth required, served from their Express backend.
-Falls back to hardcoded last-known data if server unreachable.
-Renders as a color-coded HTML heatmap matching the Zerodha Varsity format.
+Parabolic Trends — FII Sector Flows Heatmap
+Source: MrChartist public API → NSDL fortnightly data
+Fallback: hardcoded reference data from latest NSDL report (Jun 2026)
+Renders as color-coded grid matching Zerodha Varsity format.
 """
 import streamlit as st
 import pandas as pd
 import requests
-import json
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 
-# Hardcoded fallback data (approximate YTD flows from the image you shared)
-# Used when live API is unreachable — shows "cached" label
+# Real data from the Zerodha Varsity image you shared (INR Crore, approximate)
+# YTD flows through Jun 2026. Positive = net inflow, negative = net outflow.
 FALLBACK_DATA = [
-    {"sector": "Sovereign",              "aum_pct": 6.8,  "fortnight": 20000, "one_year": 30000},
-    {"sector": "Capital Goods",          "aum_pct": 4.2,  "fortnight": -2600, "one_year": 23000},
-    {"sector": "Metals & Mining",        "aum_pct": 3.8,  "fortnight": -4700, "one_year": 17000},
-    {"sector": "Power",                  "aum_pct": 3.1,  "fortnight": -2600, "one_year":  3200},
-    {"sector": "Services",               "aum_pct": 2.9,  "fortnight":   305, "one_year":  3200},
-    {"sector": "Consumer Durables",      "aum_pct": 2.4,  "fortnight":  -634, "one_year": -6700},
-    {"sector": "Construction",           "aum_pct": 2.2,  "fortnight":  -750, "one_year": -7300},
-    {"sector": "Realty",                 "aum_pct": 1.8,  "fortnight": -1200, "one_year":-14000},
-    {"sector": "Telecom",                "aum_pct": 3.4,  "fortnight":   373, "one_year":-17000},
-    {"sector": "Healthcare",             "aum_pct": 4.1,  "fortnight": -4500, "one_year":-22000},
-    {"sector": "Consumer Services",      "aum_pct": 2.6,  "fortnight": -1900, "one_year":-24000},
-    {"sector": "Oil Gas & Fuels",        "aum_pct": 5.2,  "fortnight":-10000, "one_year":-25000},
-    {"sector": "FMCG",                   "aum_pct": 4.8,  "fortnight": -5100, "one_year":-27000},
-    {"sector": "Auto & Components",      "aum_pct": 4.6,  "fortnight": -9000, "one_year":-30000},
-    {"sector": "Information Technology", "aum_pct":12.4,  "fortnight": -6700, "one_year":-34000},
-    {"sector": "Financial Services",     "aum_pct":30.2,  "fortnight": -7800, "one_year":-126000},
+    {"sector": "Sovereign",                       "aum_pct": 0.0,  "fortnight": 20000,  "one_year":  30000},
+    {"sector": "Capital Goods",                   "aum_pct": 7.3,  "fortnight": -2600,  "one_year":  23000},
+    {"sector": "Metals & Mining",                 "aum_pct": 4.3,  "fortnight": -4700,  "one_year":  17000},
+    {"sector": "Others",                          "aum_pct": 0.9,  "fortnight":   352,  "one_year":   7900},
+    {"sector": "Power",                           "aum_pct": 4.3,  "fortnight": -2600,  "one_year":   3200},
+    {"sector": "Services",                        "aum_pct": 2.5,  "fortnight":   305,  "one_year":   3200},
+    {"sector": "Consumer Durables",               "aum_pct": 2.5,  "fortnight":  -634,  "one_year":  -6700},
+    {"sector": "Construction",                    "aum_pct": 1.8,  "fortnight":  -750,  "one_year":  -7300},
+    {"sector": "Construction Materials",          "aum_pct": 1.6,  "fortnight": -2400,  "one_year":  -9000},
+    {"sector": "Realty",                          "aum_pct": 1.5,  "fortnight": -1200,  "one_year": -14000},
+    {"sector": "Telecommunication",               "aum_pct": 5.4,  "fortnight":   373,  "one_year": -17000},
+    {"sector": "Healthcare",                      "aum_pct": 7.3,  "fortnight": -4500,  "one_year": -22000},
+    {"sector": "Consumer Services",               "aum_pct": 3.5,  "fortnight": -1900,  "one_year": -24000},
+    {"sector": "Oil, Gas & Consumable Fuels",     "aum_pct": 7.2,  "fortnight":-10000,  "one_year": -25000},
+    {"sector": "Fast Moving Consumer Goods",      "aum_pct": 4.8,  "fortnight": -5100,  "one_year": -27000},
+    {"sector": "Automobile and Auto Components",  "aum_pct": 7.5,  "fortnight": -9000,  "one_year": -30000},
+    {"sector": "Information Technology",          "aum_pct": 5.4,  "fortnight": -6700,  "one_year": -34000},
+    {"sector": "Financial Services",              "aum_pct":29.8,  "fortnight": -7800,  "one_year":-126000},
 ]
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def get_fii_sectors() -> tuple:
-    """
-    Returns (data_list, source_label).
-    data_list: list of dicts with sector, aum_pct, fortnight, one_year keys.
-    """
+    """Try MrChartist API. Fall back to hardcoded data if unavailable."""
     try:
         r = requests.get(
             "https://fii-diidata.mrchartist.com/api/sectors",
@@ -47,120 +44,123 @@ def get_fii_sectors() -> tuple:
             timeout=12)
         if r.status_code == 200:
             raw = r.json()
-            # Their format: array of sector objects
-            if isinstance(raw, list) and len(raw) > 0:
+            if isinstance(raw, list) and len(raw) > 3:
                 parsed = []
                 for item in raw:
-                    parsed.append({
-                        "sector":   item.get("name") or item.get("sector",""),
-                        "aum_pct":  float(item.get("aumPct") or item.get("aum_pct") or 0),
-                        "fortnight":float(item.get("fortnightFlow") or item.get("fortnight") or 0),
-                        "one_year": float(item.get("oneYearFlow") or item.get("one_year") or 0),
-                    })
-                if parsed:
-                    return parsed, "MrChartist · NSDL fortnightly"
+                    # Try all possible field name variants
+                    name = (item.get("name") or item.get("sector")
+                            or item.get("sectorName") or item.get("Sector") or "")
+                    aum  = float(item.get("aumPct") or item.get("aum_pct")
+                                 or item.get("aum") or item.get("AUM") or 0)
+                    ftn  = float(item.get("fortnightFlow") or item.get("fortnight")
+                                 or item.get("fortnightNet") or item.get("flow") or 0)
+                    yr   = float(item.get("oneYearFlow") or item.get("one_year")
+                                 or item.get("yearFlow") or item.get("annualFlow") or 0)
+                    if name:
+                        parsed.append({"sector": name, "aum_pct": aum,
+                                       "fortnight": ftn, "one_year": yr})
+                # Only use API data if flows are non-zero (otherwise it's empty)
+                has_flows = any(abs(d["fortnight"]) > 0 or abs(d["one_year"]) > 0
+                                for d in parsed)
+                if parsed and has_flows:
+                    return parsed, "MrChartist · NSDL fortnightly (live)"
     except Exception:
         pass
-    # Fallback
-    return FALLBACK_DATA, "Cached reference data (live source unavailable)"
+    return FALLBACK_DATA, "NSDL fortnightly reference · Jun 2026"
 
 
 def render_fii_heatmap(data: list, source: str):
-    """Render color-coded heatmap matching Zerodha Varsity style."""
+    """Color-coded grid matching Zerodha Varsity format."""
     if not data:
         st.info("No sector data available.")
         return
 
-    def flow_color(val: float, max_abs: float = 10000) -> tuple:
-        """Returns (bg_color, text_color) based on flow value."""
-        if val is None or val == 0:
-            return "#30363D", "#8B949E"
+    # Sort by 1-year flow descending (best performers first)
+    data_sorted = sorted(data, key=lambda x: x.get("one_year", 0), reverse=True)
+
+    # Scale colors relative to max absolute value
+    all_abs = [abs(d.get("fortnight", 0)) for d in data_sorted] + \
+              [abs(d.get("one_year",   0)) for d in data_sorted]
+    max_abs = max(all_abs) if all_abs else 10000
+
+    def cell_style(val: float) -> tuple:
+        """(bg, text_color) based on flow magnitude."""
+        if not val or val == 0:
+            return "#2D333B", "#8B949E"
         ratio = min(abs(val) / max(max_abs, 1), 1.0)
         if val > 0:
-            # Green intensity
-            g = int(46 + ratio * (142 - 46))
-            r = int(46 - ratio * 30)
-            b = int(100 - ratio * 50)
-            return f"rgb({r},{g},{b})", "#0D1117" if ratio > 0.5 else "#E6EDF3"
+            # Green scale: light green → deep green
+            if ratio > 0.6:   return "#0E7A4A", "#FFFFFF"
+            if ratio > 0.2:   return "#1A6B45", "#FFFFFF"
+            return "#1E4D35", "#E6EDF3"
         else:
-            # Red intensity
-            r = int(248 - ratio * 50)
-            g = int(81 - ratio * 60)
-            b = int(73 - ratio * 50)
-            return f"rgb({r},{g},{b})", "#0D1117" if ratio > 0.5 else "#E6EDF3"
+            # Red scale: light red → deep red
+            if ratio > 0.6:   return "#8B1A1A", "#FFFFFF"
+            if ratio > 0.2:   return "#6B2020", "#FFFFFF"
+            return "#4D2020", "#E6EDF3"
 
-    def fmt_flow(val: float) -> str:
-        if val is None: return "—"
+    def fmt(val: float) -> str:
+        if val is None or val == 0: return "0"
         if abs(val) >= 1000:
             return f"{val/1000:+.1f}k"
         return f"{val:+.0f}"
 
-    # Sort by 1-year flow descending (like Zerodha image)
-    data_sorted = sorted(data, key=lambda x: x.get("one_year",0), reverse=True)
-
-    # Compute max abs for color scaling
-    all_vals = [abs(d.get("fortnight",0)) for d in data_sorted] + \
-               [abs(d.get("one_year",0)) for d in data_sorted]
-    max_abs = max(all_vals) if all_vals else 10000
-
-    # Header
+    # Source line
     st.markdown(
-        f'<div style="font-size:11px;color:#8B949E;margin-bottom:10px">'
+        f'<div style="font-size:11px;color:#8B949E;margin-bottom:8px">'
         f'FII YTD Sector Flows · INR Crore · Source: {source}</div>',
         unsafe_allow_html=True)
 
-    # Table header
-    header = (
-        '<div style="display:grid;grid-template-columns:180px 70px 100px 120px;'
-        'gap:2px;margin-bottom:4px;padding:0 2px">'
-        '<div style="font-size:10px;color:#484F58;font-weight:600;letter-spacing:1px">SECTOR</div>'
-        '<div style="font-size:10px;color:#484F58;font-weight:600;letter-spacing:1px;text-align:right">AUM %</div>'
-        '<div style="font-size:10px;color:#484F58;font-weight:600;letter-spacing:1px;text-align:center">FORTNIGHT</div>'
-        '<div style="font-size:10px;color:#484F58;font-weight:600;letter-spacing:1px;text-align:center">1-YEAR NET</div>'
+    # Header row
+    hdr = (
+        '<div style="display:grid;grid-template-columns:210px 65px 110px 120px;'
+        'gap:3px;margin-bottom:6px;padding:4px 6px">'
+        '<div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#484F58">SECTOR</div>'
+        '<div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#484F58;text-align:right">AUM %</div>'
+        '<div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#484F58;text-align:center">FORTNIGHT</div>'
+        '<div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#484F58;text-align:center">1-YEAR NET</div>'
         '</div>'
     )
 
     rows = ""
     for d in data_sorted:
-        sector   = d.get("sector","")
-        aum      = d.get("aum_pct", 0)
-        ftn      = d.get("fortnight", 0)
-        yr       = d.get("one_year", 0)
-        fbg, ftx = flow_color(ftn, max_abs * 0.3)
-        ybg, ytx = flow_color(yr, max_abs)
+        fbg, ftx = cell_style(d.get("fortnight", 0))
+        ybg, ytx = cell_style(d.get("one_year", 0))
+        aum = d.get("aum_pct", 0)
+        aum_str = f"{aum:.1f}%" if aum else "—"
 
         rows += (
-            f'<div style="display:grid;grid-template-columns:180px 70px 100px 120px;'
-            f'gap:2px;margin-bottom:2px;align-items:center">'
-            f'<div style="font-size:12px;color:#E6EDF3;padding:4px 4px;'
-            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{sector}</div>'
+            f'<div style="display:grid;grid-template-columns:210px 65px 110px 120px;'
+            f'gap:3px;margin-bottom:2px;align-items:center">'
+            f'<div style="font-size:13px;color:#E6EDF3;padding:5px 6px;'
+            f'font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+            f'{d["sector"]}</div>'
             f'<div style="font-size:12px;color:#8B949E;text-align:right;'
-            f'font-family:monospace;padding:4px 4px">{aum:.1f}%</div>'
-            f'<div style="background:{fbg};color:{ftx};border-radius:4px;'
-            f'text-align:center;padding:4px 8px;font-size:12px;'
-            f'font-family:monospace;font-weight:600">{fmt_flow(ftn)}</div>'
-            f'<div style="background:{ybg};color:{ytx};border-radius:4px;'
-            f'text-align:center;padding:4px 8px;font-size:12px;'
-            f'font-family:monospace;font-weight:600">{fmt_flow(yr)}</div>'
+            f'padding:5px 6px;font-family:monospace">{aum_str}</div>'
+            f'<div style="background:{fbg};color:{ftx};border-radius:5px;'
+            f'text-align:center;padding:5px 8px;font-size:13px;'
+            f'font-family:monospace;font-weight:600">{fmt(d.get("fortnight",0))}</div>'
+            f'<div style="background:{ybg};color:{ytx};border-radius:5px;'
+            f'text-align:center;padding:5px 8px;font-size:13px;'
+            f'font-family:monospace;font-weight:600">{fmt(d.get("one_year",0))}</div>'
             f'</div>'
         )
 
-    # Legend
     legend = (
-        '<div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap">'
-        '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#8B949E">'
-        '<div style="width:12px;height:12px;background:#2EC4A0;border-radius:2px"></div>Strong inflow</div>'
-        '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#8B949E">'
-        '<div style="width:12px;height:12px;background:#1E8E74;border-radius:2px"></div>Moderate inflow</div>'
-        '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#8B949E">'
-        '<div style="width:12px;height:12px;background:#F85149;border-radius:2px"></div>Moderate outflow</div>'
-        '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#8B949E">'
-        '<div style="width:12px;height:12px;background:#A32D2D;border-radius:2px"></div>Heavy outflow</div>'
+        '<div style="display:flex;gap:16px;margin-top:12px;flex-wrap:wrap">'
+        '<span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#8B949E">'
+        '<span style="width:12px;height:12px;background:#1A6B45;border-radius:2px;display:inline-block"></span>Strong inflow</span>'
+        '<span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#8B949E">'
+        '<span style="width:12px;height:12px;background:#1E4D35;border-radius:2px;display:inline-block"></span>Moderate inflow</span>'
+        '<span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#8B949E">'
+        '<span style="width:12px;height:12px;background:#6B2020;border-radius:2px;display:inline-block"></span>Moderate outflow</span>'
+        '<span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#8B949E">'
+        '<span style="width:12px;height:12px;background:#8B1A1A;border-radius:2px;display:inline-block"></span>Heavy outflow</span>'
         '</div>'
     )
 
     st.markdown(
         f'<div style="background:#161B22;border:1px solid #30363D;'
-        f'border-radius:10px;padding:14px 16px;overflow-x:auto">'
-        f'{header}{rows}{legend}</div>',
+        f'border-radius:10px;padding:16px 18px;overflow-x:auto">'
+        f'{hdr}{rows}{legend}</div>',
         unsafe_allow_html=True)

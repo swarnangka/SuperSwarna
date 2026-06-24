@@ -147,19 +147,30 @@ def generate_synthesis(global_pulse: dict, recap: dict,
     """Call Claude API once per 6AM cache window to write the morning note."""
     try:
         import anthropic, os
-        # Resolve API key from Streamlit secrets or environment
+        # Resolve API key — try every possible location robustly
         api_key = None
         try:
-            api_key = (st.secrets.get("ANTHROPIC_API_KEY")
-                       or st.secrets.get("anthropic_api_key")
-                       or (st.secrets.get("anthropic") or {}).get("api_key"))
+            api_key = st.secrets["ANTHROPIC_API_KEY"]
         except Exception:
             pass
         if not api_key:
+            try:
+                api_key = st.secrets["anthropic_api_key"]
+            except Exception:
+                pass
+        if not api_key:
+            try:
+                api_key = st.secrets["anthropic"]["api_key"]
+            except Exception:
+                pass
+        if not api_key:
             api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
-            return ("Morning brief unavailable — add ANTHROPIC_API_KEY to "
-                    "Streamlit Secrets (Settings → Secrets → ANTHROPIC_API_KEY = \"sk-ant-...\")")
+            return ("Morning brief unavailable — ANTHROPIC_API_KEY not found. "
+                    "In Streamlit: Settings → Secrets → add exactly:\n"
+                    "ANTHROPIC_API_KEY = \"sk-ant-api03-...\"")
+        if not str(api_key).startswith("sk-"):
+            return f"Morning brief unavailable — API key looks wrong (starts with '{str(api_key)[:8]}...'). Check Streamlit Secrets."
         # Build a tight data summary for the prompt
         dxy = global_pulse.get("DXY", {})
         crude = global_pulse.get("Crude", {})
