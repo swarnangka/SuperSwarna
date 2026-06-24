@@ -16,7 +16,7 @@ from banlist import fno_ban_mwpl
 from hhll import get_hhll_signals
 from morning_brief import (fetch_global_pulse, fetch_indian_recap,
                            compute_key_levels, fetch_top_news, generate_synthesis)
-from fii_sectors import get_fii_sector_heatmap
+from fii_sectors import get_fii_sectors, render_fii_heatmap
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -523,20 +523,9 @@ with st.expander("FII Sector Flows"):
                 st.session_state["fii_done"]=False; st.rerun()
     if run_fii: st.session_state["fii_done"]=True
     if st.session_state.get("fii_done"):
-        with st.spinner("Fetching NSDL sector data…"):
-            fii_df=get_fii_sector_heatmap()
-        if not fii_df.empty:
-            num_cols=[c for c in fii_df.columns if c not in ["Sector","YTD"]]
-            def color_flow(val):
-                if pd.isna(val): return ""
-                if val>5000: return "background:#1E8E74;color:#fff"
-                if val>0: return "background:#2EC4A0;color:#0D1117"
-                if val>-5000: return "background:#F85149;color:#fff"
-                return "background:#A32D2D;color:#fff"
-            st.dataframe(fii_df,width="stretch",hide_index=True,height=500)
-            st.caption("Source: NSDL fortnightly FPI sector reports · INR Crore")
-        else:
-            st.info("NSDL data unavailable. Try again — server may have blocked this request.")
+        with st.spinner("Fetching FII sector data…"):
+            fii_data, fii_source = get_fii_sectors()
+        render_fii_heatmap(fii_data, fii_source)
 
 with st.expander("Market News"):
     nc1,nc2=st.columns([1,1])
