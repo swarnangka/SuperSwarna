@@ -1,7 +1,7 @@
 """
-SuperSwarna — engine v2
-Minervini ON/OFF + Supertrend ON/OFF for indices.
-F&O screener with 10AM momentum. 52W high/low scans over NSE cash universe.
+Parabolic Trends — engine v3
+Swarna Risk: weighted score out of 11 → LOW / MODERATE / HIGH
+Supertrend signal date: scans candle history for last flip
 """
 import streamlit as st
 import pandas as pd
@@ -12,29 +12,78 @@ from data_layer import (
     get_10am_price, fetch_yf, load_instruments, INDEX_TOKENS
 )
 
-# Liquid F&O universe (NSE symbols, no suffix)
 FNO_STOCKS = [
     "RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK","HINDUNILVR","ITC","SBIN",
     "BHARTIARTL","KOTAKBANK","LT","AXISBANK","ASIANPAINT","MARUTI","TITAN",
     "SUNPHARMA","BAJFINANCE","HCLTECH","WIPRO","ULTRACEMCO","NESTLEIND","NTPC",
-    "POWERGRID","TATAMOTORS","TATASTEEL","JSWSTEEL","ADANIENT","ADANIPORTS",
+    "POWERGRID","TATASTEEL","JSWSTEEL","ADANIENT","ADANIPORTS",
     "COALINDIA","ONGC","GRASIM","HINDALCO","CIPLA","DRREDDY","DIVISLAB",
     "BAJAJFINSV","BAJAJ-AUTO","HEROMOTOCO","EICHERMOT","BRITANNIA","TECHM",
     "INDUSINDBK","BPCL","IOC","SHREECEM","UPL","APOLLOHOSP","TATACONSUM",
     "PIDILITIND","DABUR","GODREJCP","HAVELLS","DLF","SIEMENS","PNB",
     "BANKBARODA","CANBK","FEDERALBNK","IDFCFIRSTB","BANDHANBNK","AUBANK",
-    "ZOMATO","PAYTM","NYKAA","POLICYBZR","DMART","TRENT","NAUKRI","INDIGO",
-    "VEDL","SAIL","NMDC","BEL","HAL","BHEL","IRCTC","GAIL","PETRONET",
-    "TORNTPHARM","LUPIN","AUROPHARMA","BIOCON","COLPAL","MARICO","BERGEPAINT",
-    "AMBUJACEM","ACC","MOTHERSON","BOSCHLTD","BALKRISIND","CUMMINSIND","ABB",
-    "PFC","RECLTD","IRFC","JINDALSTEL","TVSMOTOR","CHOLAFIN","SHRIRAMFIN",
-    "MUTHOOTFIN","ICICIGI","ICICIPRULI","SBILIFE","HDFCLIFE","INDUSTOWER",
-    "LTIM","PERSISTENT","COFORGE","MPHASIS","TATAPOWER","ADANIGREEN",
+    "ZOMATO","DMART","TRENT","NAUKRI","INDIGO","VEDL","SAIL","NMDC",
+    "BEL","HAL","BHEL","IRCTC","GAIL","PETRONET","TORNTPHARM","LUPIN",
+    "AUROPHARMA","BIOCON","COLPAL","MARICO","BERGEPAINT","AMBUJACEM","ACC",
+    "MOTHERSON","BOSCHLTD","BALKRISIND","CUMMINSIND","ABB","PFC","RECLTD",
+    "IRFC","JINDALSTEL","TVSMOTOR","CHOLAFIN","SHRIRAMFIN","MUTHOOTFIN",
+    "ICICIGI","ICICIPRULI","SBILIFE","HDFCLIFE","INDUSTOWER",
+    "PERSISTENT","COFORGE","MPHASIS","TATAPOWER","ADANIGREEN",
 ]
+
+# ── Weighted criteria definition ───────────────────────────────────────────────
+# Weight rationale (total = 11):
+#   200DMA trending up  = 2  (bedrock of Stage 2 — most critical)
+#   Price > 150 & 200   = 2  (confirms Stage 2 entry)
+#   Within 25% of 52WH  = 2  (relative strength proxy — institutional demand)
+#   50DMA > 150 & 200   = 1.5 (MA alignment across timeframes)
+#   Price > 50DMA       = 1.5 (short-term trend confirmation)
+#   ≥30% above 52WL     = 1  (momentum, but passes easily in bull markets)
+#   150DMA > 200DMA     = 1  (structural but derivative of above)
+
+CRITERIA_WEIGHTS = [2, 2, 2, 1.5, 1.5, 1, 1]
+MAX_SCORE = sum(CRITERIA_WEIGHTS)  # 11
+
+
+def _risk_level(score: float) -> tuple:
+    """Returns (level, color) for a weighted score out of 11."""
+    pct = score / MAX_SCORE
+    if pct >= 0.72:   return "LOW",      "#2EC4A0"   # green
+    if pct >= 0.45:   return "MODERATE", "#D29922"   # amber
+    return             "HIGH",     "#F85149"   # red
+
+
+def _supertrend_since(df: pd.DataFrame) -> tuple:
+    """
+    Scan backwards to find when current Supertrend direction started.
+    Returns (direction_str, date_str, bars_ago, price_at_signal)
+    """
+    if df.empty or "ST_dir" not in df.columns or len(df) < 3:
+        return "—", "—", 0, None
+    dirs = df["ST_dir"].values
+    closes = df["Close"].values
+    dates = df.index
+    current_dir = int(dirs[-1])
+    # Walk backwards to find the flip point
+    flip_idx = len(dirs) - 1
+    for i in range(len(dirs) - 2, -1, -1):
+        if int(dirs[i]) != current_dir:
+            flip_idx = i + 1
+            break
+        if i == 0:
+            flip_idx = 0
+    direction = "BUY" if current_dir == 1 else "SELL"
+    flip_date = dates[flip_idx]
+    flip_price = float(closes[flip_idx])
+    bars_ago = len(dirs) - 1 - flip_idx
+    try:
+        date_str = flip_date.strftime("%d %b")
+    except Exception:
+        date_str = str(flip_date)[:10]
+    return direction, date_str, bars_ago, flip_price
 
 
 def get_index_history(index_name: str) -> pd.DataFrame:
-    """Daily candles for an index — SmartAPI first, yfinance fallback."""
     info = INDEX_TOKENS[index_name]
     df = get_candles(info["token"], info["exchange"], "ONE_DAY", days=400)
     if df.empty:
@@ -43,87 +92,95 @@ def get_index_history(index_name: str) -> pd.DataFrame:
 
 
 def index_risk(index_name: str) -> dict:
-    """Minervini ON/OFF + Supertrend(10,3) ON/OFF. Binary, no high/med/low."""
+    """
+    Swarna weighted risk score (out of 11) + Supertrend direction + signal date.
+    Risk levels: LOW (≥8), MODERATE (5-7), HIGH (0-4).
+    """
     df = add_mas(get_index_history(index_name))
     if df.empty or len(df) < 200:
         return {"index": index_name, "minervini": None, "supertrend": None,
-                "ltp": None, "chg": None, "checks": []}
+                "ltp": None, "chg": None, "chg_pts": None, "checks": [],
+                "score": 0, "risk_level": "HIGH", "risk_color": "#F85149",
+                "st_since": "—", "st_date": "—", "st_bars": 0, "st_price": None,
+                "conditions_met": 0, "total_conditions": 7, "pct_200": 0}
+
     df = supertrend(df, 10, 3.0)
     r = df.iloc[-1]
-    price = float(r["Close"])
-    ma50, ma150, ma200 = float(r["MA50"]), float(r["MA150"]), float(r["MA200"])
-    ma200_1m = float(r["MA200_1M"]) if not np.isnan(r["MA200_1M"]) else ma200
-    lo52, hi52 = float(r["52WL"]), float(r["52WH"])
+    price  = float(r["Close"])
+    ma50   = float(r["MA50"])
+    ma150  = float(r["MA150"])
+    ma200  = float(r["MA200"])
+    ma200_1m = float(r["MA200_1M"]) if not np.isnan(r.get("MA200_1M", float("nan"))) else ma200
+    lo52   = float(r["52WL"])
+    hi52   = float(r["52WH"])
 
-    # Minervini Trend Template — each criterion labeled with actual values + weight.
-    # Equal weight (each 1 of 7). minervini_on = ON only if ALL pass.
-    checks = [
-        {
-            "label": "Price above 150 & 200 DMA",
-            "pass": price > ma150 and price > ma200,
-            "detail": f"Price ₹{price:,.0f} vs 150DMA ₹{ma150:,.0f}, 200DMA ₹{ma200:,.0f}",
-            "weight": 1,
-        },
-        {
-            "label": "150 DMA above 200 DMA",
-            "pass": ma150 > ma200,
-            "detail": f"150DMA ₹{ma150:,.0f} vs 200DMA ₹{ma200:,.0f}",
-            "weight": 1,
-        },
-        {
-            "label": "200 DMA trending up (1 month)",
-            "pass": ma200 > ma200_1m,
-            "detail": f"200DMA now ₹{ma200:,.0f} vs 1M ago ₹{ma200_1m:,.0f} "
-                      f"({(ma200-ma200_1m)/ma200_1m*100:+.2f}%)",
-            "weight": 1,
-        },
-        {
-            "label": "50 DMA above 150 & 200 DMA",
-            "pass": ma50 > ma150 and ma50 > ma200,
-            "detail": f"50DMA ₹{ma50:,.0f} vs 150DMA ₹{ma150:,.0f}, 200DMA ₹{ma200:,.0f}",
-            "weight": 1,
-        },
-        {
-            "label": "Price above 50 DMA",
-            "pass": price > ma50,
-            "detail": f"Price ₹{price:,.0f} vs 50DMA ₹{ma50:,.0f}",
-            "weight": 1,
-        },
-        {
-            "label": "≥30% above 52-week low",
-            "pass": price >= lo52 * 1.30,
-            "detail": f"Price ₹{price:,.0f} is {(price-lo52)/lo52*100:+.0f}% above "
-                      f"52W low ₹{lo52:,.0f} (need ≥30%)",
-            "weight": 1,
-        },
-        {
-            "label": "Within 25% of 52-week high",
-            "pass": price >= hi52 * 0.75,
-            "detail": f"Price ₹{price:,.0f} is {(price-hi52)/hi52*100:+.0f}% from "
-                      f"52W high ₹{hi52:,.0f} (need ≥−25%)",
-            "weight": 1,
-        },
+    # 7 criteria with weights
+    raw = [
+        # (pass, label, weight, detail)
+        (ma200 > ma200_1m,
+         "200 DMA trending up (1M)",  2,
+         f"200DMA {ma200:,.0f} vs 1M ago {ma200_1m:,.0f} ({(ma200-ma200_1m)/ma200_1m*100:+.1f}%)"),
+        (price > ma150 and price > ma200,
+         "Price above 150 & 200 DMA", 2,
+         f"Price {price:,.0f} | 150DMA {ma150:,.0f} | 200DMA {ma200:,.0f}"),
+        (price >= hi52 * 0.75,
+         "Within 25% of 52-week high", 2,
+         f"Price {price:,.0f} | 52W High {hi52:,.0f} ({(price-hi52)/hi52*100:+.1f}%)"),
+        (ma50 > ma150 and ma50 > ma200,
+         "50 DMA above 150 & 200 DMA", 1.5,
+         f"50DMA {ma50:,.0f} | 150DMA {ma150:,.0f} | 200DMA {ma200:,.0f}"),
+        (price > ma50,
+         "Price above 50 DMA", 1.5,
+         f"Price {price:,.0f} | 50DMA {ma50:,.0f}"),
+        (price >= lo52 * 1.30,
+         "≥30% above 52-week low", 1,
+         f"Price {price:,.0f} | 52W Low {lo52:,.0f} ({(price-lo52)/lo52*100:+.0f}%)"),
+        (ma150 > ma200,
+         "150 DMA above 200 DMA", 1,
+         f"150DMA {ma150:,.0f} | 200DMA {ma200:,.0f}"),
     ]
-    conditions = [c["pass"] for c in checks]
-    minervini_on = all(conditions)
+
+    checks = []
+    score = 0.0
+    for passed, label, weight, detail in raw:
+        checks.append({"pass": passed, "label": label,
+                       "weight": weight, "detail": detail})
+        if passed:
+            score += weight
+
+    conditions_met = sum(1 for c in checks if c["pass"])
+    risk_level, risk_color = _risk_level(score)
     st_on = int(r["ST_dir"]) == 1
 
+    # Supertrend signal date
+    st_since, st_date, st_bars, st_price = _supertrend_since(df)
+
+    # LTP
     info = INDEX_TOKENS[index_name]
     ltp = get_ltp(index_name, info["token"], info["exchange"])
-    if ltp != ltp:  # nan
+    if ltp != ltp:
         ltp = price
     prev = float(df["Close"].iloc[-2])
     chg = (ltp - prev) / prev * 100
     chg_pts = ltp - prev
+    pct_200 = (price - ma200) / ma200 * 100
 
-    return {"index": index_name, "minervini": minervini_on, "supertrend": st_on,
-            "ltp": ltp, "chg": chg, "chg_pts": chg_pts, "price": price, "ma200": ma200,
-            "checks": checks,
-            "conditions_met": sum(conditions), "total_conditions": len(conditions)}
+    return {
+        "index": index_name,
+        "minervini": conditions_met == 7,
+        "supertrend": st_on,
+        "ltp": ltp, "chg": chg, "chg_pts": chg_pts,
+        "price": price, "ma200": ma200, "pct_200": pct_200,
+        "score": score, "max_score": MAX_SCORE,
+        "risk_level": risk_level, "risk_color": risk_color,
+        "checks": checks,
+        "conditions_met": conditions_met, "total_conditions": 7,
+        "st_since": st_since, "st_date": st_date,
+        "st_bars": st_bars, "st_price": st_price,
+    }
 
 
-def _process_stock(sym: str, df: pd.DataFrame, st_factor: float,
-                   ref_10am: float = None) -> dict:
+def _process_stock(sym, df, st_factor, ref_10am=None):
     if df.empty or len(df) < 60:
         return None
     d = add_mas(df)
@@ -133,20 +190,15 @@ def _process_stock(sym: str, df: pd.DataFrame, st_factor: float,
     hi52 = float(d["52WH"].iloc[-1])
     lo52 = float(d["52WL"].iloc[-1])
     chg = (last - prev) / prev * 100
-    from_high = (last - hi52) / hi52 * 100
-    from_low = (last - lo52) / lo52 * 100
     wk = d["Close"].resample("W").last().dropna()
     mo = d["Close"].resample("ME").last().dropna()
-    dy = d["Close"]
     row = {
-        "Symbol": sym,
-        "LTP": round(last, 1),
-        "Chg %": round(chg, 2),
-        "Daily RSI": round(rsi(dy, 14), 1) if len(dy) > 15 else None,
+        "Symbol": sym, "LTP": round(last, 1), "Chg %": round(chg, 2),
+        "Daily RSI": round(rsi(d["Close"], 14), 1) if len(d) > 15 else None,
         "Wkly RSI": round(rsi(wk, 14), 1) if len(wk) > 15 else None,
         "Mnly RSI": round(rsi(mo, 14), 1) if len(mo) > 15 else None,
-        "% from 52WH": round(from_high, 1),
-        "% from 52WL": round(from_low, 1),
+        "% from 52WH": round((last-hi52)/hi52*100, 1),
+        "% from 52WL": round((last-lo52)/lo52*100, 1),
         "Supertrend": "BUY" if int(d["ST_dir"].iloc[-1]) == 1 else "SELL",
     }
     if ref_10am is not None and ref_10am == ref_10am and ref_10am > 0:
@@ -154,8 +206,7 @@ def _process_stock(sym: str, df: pd.DataFrame, st_factor: float,
     return row
 
 
-def scan_fno(stocks: list, st_factor: float = 2.0, with_10am: bool = True) -> pd.DataFrame:
-    """F&O screener with daily/weekly/monthly RSI, supertrend, 10AM momentum."""
+def scan_fno(stocks, st_factor=2.0, with_10am=True):
     rows = []
     progress = st.progress(0.0, text="Scanning F&O stocks…")
     n = len(stocks)
@@ -169,55 +220,15 @@ def scan_fno(stocks: list, st_factor: float = 2.0, with_10am: bool = True) -> pd
         if row:
             rows.append(row)
         progress.progress((i+1)/n, text=f"Scanning… {sym} ({i+1}/{n})")
-        time.sleep(0.25)  # respect ~3 req/s rate limit
+        time.sleep(0.25)
     progress.empty()
     return pd.DataFrame(rows)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_scan_universe(mode: str = "fno_plus") -> list:
-    """Universe for 52W scans. 'all' = full NSE cash; 'fno_plus' = liquid subset."""
+def get_scan_universe(mode="fno_plus"):
     if mode == "all":
         inst = load_instruments()
         if not inst.empty:
             return inst["clean"].tolist()
     return FNO_STOCKS
-
-
-def scan_52w(stocks: list, kind: str = "high", threshold: float = 3.0,
-             max_scan: int = 750) -> pd.DataFrame:
-    """Stocks near 52-week high (kind='high') or low (kind='low')."""
-    rows = []
-    scan_list = stocks[:max_scan]
-    n = len(scan_list)
-    progress = st.progress(0.0, text=f"Scanning for 52-week {kind}s…")
-    for i, sym in enumerate(scan_list):
-        tok = token_for(sym)
-        if tok is None:
-            progress.progress((i+1)/n); continue
-        df = get_candles(tok, "NSE", "ONE_DAY", days=400)
-        if not df.empty and len(df) >= 60:
-            d = add_mas(df)
-            last = float(d["Close"].iloc[-1])
-            prev = float(d["Close"].iloc[-2])
-            hi52 = float(d["52WH"].iloc[-1])
-            lo52 = float(d["52WL"].iloc[-1])
-            from_high = (last - hi52) / hi52 * 100
-            from_low = (last - lo52) / lo52 * 100
-            include = (kind == "high" and from_high >= -threshold) or \
-                      (kind == "low" and from_low <= threshold)
-            if include:
-                rows.append({
-                    "Symbol": sym, "LTP": round(last, 1),
-                    "Chg %": round((last-prev)/prev*100, 2),
-                    "% from 52WH": round(from_high, 1),
-                    "% from 52WL": round(from_low, 1),
-                    "52W High": round(hi52, 1), "52W Low": round(lo52, 1),
-                })
-        progress.progress((i+1)/n, text=f"Scanning {kind}s… ({i+1}/{n})")
-        time.sleep(0.25)
-    progress.empty()
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        df = df.sort_values("% from 52WH", ascending=(kind == "low"))
-    return df

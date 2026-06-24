@@ -1,62 +1,142 @@
 """
-SuperSwarna — Chartink screener integration
-Uses Chartink's public scan endpoint (unofficial). Free accounts return
-data delayed ~30-45 min. Returns the matching stock list only.
+Parabolic Trends — Chartink integration
+Unofficial CSRF + POST endpoint for scan results.
 """
 import streamlit as st
 import pandas as pd
 import requests
 import re
 
-PROCESS_URL = "https://chartink.com/screener/process"
-SCREENER_URL = "https://chartink.com/screener/"
+UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36")
 
-# Your saved screeners. Edit these — paste the scan_clause from Chartink's
-# Network → process → Payload (or rebuild via their visual builder).
-# Find scan_clause: open your screener on chartink.com, F12 → Network →
-# run scan → click 'process' → Payload tab → copy the scan_clause value.
-try:
-    from screeners import SCREENERS as DEFAULT_SCREENERS
-except Exception:
-    DEFAULT_SCREENERS = {
-        "52-Week High": "( {33489} ( daily close >= daily max( 240 , daily close ) ) )",
-    }
+# Screener dropdown options (existing)
+DEFAULT_SCREENERS = {
+    "52-Week High":
+        "( {33489} ( daily close >= daily max( 240 , daily close ) ) )",
+    "Multi-TF RSI > 70 (D/W/M)":
+        "( {33489} ( daily rsi( 14 ) > 70 and weekly rsi( 14 ) > 70 and "
+        "monthly rsi( 14 ) > 70 ) )",
+    "Minervini Trend + Monthly RSI > 75":
+        "( {33489} ( daily ema( close,50 ) > daily ema( close,150 ) and "
+        "daily ema( close,150 ) > daily ema( close,200 ) and "
+        "daily close > daily ema( close,50 ) and daily volume > 100000 and "
+        "monthly rsi( 14 ) > 75 ) )",
+}
+
+# Ticker tape scans — fetched by slug, shown as scrolling tapes
+TAPE_SCANS = {
+    "52W":     "one-year-high-cross-2",
+    "MM":      "mm-rsi-89",
+    "DWM RSI": "dwm-rsi-656556",
+    "ATR":     "swarna-atr",
+}
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def run_chartink_scan(scan_clause: str) -> pd.DataFrame:
-    """Run a Chartink scan and return matching stocks as a DataFrame."""
+def _get_csrf(sess: requests.Session) -> str:
     try:
-        with requests.Session() as s:
-            s.headers.update({
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                              "AppleWebKit/537.36 (KHTML, like Gecko) "
-                              "Chrome/120.0 Safari/537.36",
-                "Referer": SCREENER_URL,
-            })
-            page = s.get(SCREENER_URL, timeout=20)
-            m = re.search(r'name="csrf-token"\s+content="([^"]+)"', page.text)
-            if not m:
-                return pd.DataFrame({"error": ["Could not get CSRF token from Chartink"]})
-            s.headers["x-csrf-token"] = m.group(1)
-            s.headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
-            r = s.post(PROCESS_URL, data={"scan_clause": scan_clause}, timeout=30)
-            if r.status_code != 200:
-                return pd.DataFrame({"error": [f"Chartink returned status {r.status_code}"]})
-            j = r.json()
-            data = j.get("data", [])
-            if not data:
-                return pd.DataFrame()
-            df = pd.DataFrame(data)
-            # Standard Chartink columns: nsecode, name, close, per_chg, volume
-            cols = {}
-            if "nsecode" in df: cols["nsecode"] = "Symbol"
-            if "name" in df: cols["name"] = "Name"
-            if "close" in df: cols["close"] = "Close"
-            if "per_chg" in df: cols["per_chg"] = "Chg %"
-            if "volume" in df: cols["volume"] = "Volume"
-            df = df.rename(columns=cols)
-            keep = [c for c in ["Symbol","Name","Close","Chg %","Volume"] if c in df.columns]
-            return df[keep] if keep else df
+        r = sess.get("https://chartink.com/screener/", timeout=10)
+        m = re.search(r'meta name="csrf-token" content="([^"]+)"', r.text)
+        return m.group(1) if m else ""
+    except Exception:
+        return ""
+
+
+def _get_scan_clause_from_slug(sess: requests.Session, slug: str) -> str:
+    """Fetch scan clause from a public Chartink screener slug."""
+    try:
+        r = sess.get(f"https://chartink.com/screener/{slug}", timeout=12)
+        # Look for scan_clause in textarea
+        m = re.search(
+            r'<textarea[^>]*name=["\']scan_clause["\'][^>]*>(.*?)</textarea>',
+            r.text, re.DOTALL | re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+        # Fallback: look for JS variable
+        m = re.search(r'scan_clause["\s:=]+["\']([^"\']{10,})["\']', r.text)
+        if m:
+            return m.group(1).strip()
+    except Exception:
+        pass
+    return ""
+
+
+def run_chartink_scan(scan_clause: str) -> pd.DataFrame:
+    """Run any scan clause via Chartink API."""
+    sess = requests.Session()
+    sess.headers.update({"User-Agent": UA, "Referer": "https://chartink.com/"})
+    csrf = _get_csrf(sess)
+    if not csrf:
+        return pd.DataFrame([{"error": "Could not connect to Chartink"}])
+    try:
+        r = sess.post(
+            "https://chartink.com/screener/process",
+            data={"scan_clause": scan_clause},
+            headers={"X-Csrf-Token": csrf,
+                     "Content-Type": "application/x-www-form-urlencoded",
+                     "X-Requested-With": "XMLHttpRequest"},
+            timeout=20)
+        j = r.json()
+        data = j.get("data", [])
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data)
+        rename = {"nsecode":"Symbol","close":"LTP","per_chg":"Chg %",
+                  "volume":"Volume","mcap":"MCap"}
+        df = df.rename(columns={k:v for k,v in rename.items() if k in df.columns})
+        for col in ["LTP","Chg %"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        keep = [c for c in ["Symbol","LTP","Chg %","Volume"] if c in df.columns]
+        return df[keep]
     except Exception as e:
-        return pd.DataFrame({"error": [f"Chartink fetch failed: {str(e)[:120]}"]})
+        return pd.DataFrame([{"error": str(e)[:80]}])
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_tape_scan(label: str, slug: str) -> list:
+    """
+    Fetch a public Chartink screener by slug.
+    Returns list of dicts: {symbol, chg}
+    Cached 30 min.
+    """
+    sess = requests.Session()
+    sess.headers.update({"User-Agent": UA, "Referer": "https://chartink.com/"})
+    csrf = _get_csrf(sess)
+    if not csrf:
+        return []
+    clause = _get_scan_clause_from_slug(sess, slug)
+    if not clause:
+        # Fallback clauses for known slugs
+        fallbacks = {
+            "one-year-high-cross-2":
+                "( {33489} ( daily close >= daily max( 240 , daily close ) ) )",
+            "mm-rsi-89":
+                "( {33489} ( daily rsi( 14 ) > 60 and weekly rsi( 14 ) > 60 ) )",
+            "dwm-rsi-656556":
+                "( {33489} ( daily rsi( 14 ) > 70 and weekly rsi( 14 ) > 70 and monthly rsi( 14 ) > 70 ) )",
+            "swarna-atr":
+                "( {33489} ( daily close >= daily max( 240 , daily close ) and daily volume > daily sma( volume,20 ) * 1.5 ) )",
+        }
+        clause = fallbacks.get(slug, "")
+    if not clause:
+        return []
+    try:
+        r = sess.post(
+            "https://chartink.com/screener/process",
+            data={"scan_clause": clause},
+            headers={"X-Csrf-Token": csrf,
+                     "Content-Type": "application/x-www-form-urlencoded",
+                     "X-Requested-With": "XMLHttpRequest"},
+            timeout=20)
+        j = r.json()
+        data = j.get("data", [])
+        results = []
+        for item in data:
+            sym = item.get("nsecode","")
+            chg = float(item.get("per_chg", 0) or 0)
+            if sym:
+                results.append({"symbol": sym, "chg": chg})
+        return results[:60]  # cap at 60 symbols per tape
+    except Exception:
+        return []
