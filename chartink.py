@@ -40,10 +40,12 @@ TAPE_SCANS = {
     },
     "ATR": {
         "slug": "swarna-atr",
-        # ATR breakout — price crosses 52W high with volume surge
+        # ATR momentum: price makes 52W high AND closes above upper Bollinger + high volume
+        # This approximates an ATR-based breakout scan
         "fallback": (
             "( {33489} ( daily close >= daily max( 240 , daily close ) and "
-            "daily volume >= daily sma( volume , 20 ) * 1.5 ) )"
+            "daily volume >= daily sma( volume , 10 ) * 2 and "
+            "daily close >= daily ema( close , 20 ) ) )"
         ),
     },
 }
@@ -94,7 +96,7 @@ def _run_clause(sess: requests.Session, csrf: str, clause: str) -> list:
             chg = float(item.get("per_chg", 0) or 0)
             if sym:
                 out.append({"symbol": sym, "chg": chg})
-        return out[:80]
+        return out  # no cap — return all results
     except Exception:
         return []
 

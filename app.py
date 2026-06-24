@@ -26,11 +26,6 @@ st.set_page_config(page_title="Parabolic Trends", page_icon="📈",
                    layout="wide", initial_sidebar_state="collapsed")
 
 # ── Global Refresh ─────────────────────────────────────────────────────────────
-def _clear_all():
-    for k in list(st.session_state.keys()):
-        del st.session_state[k]
-    st.cache_data.clear()
-    st.rerun()
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 def ist_now():
@@ -72,8 +67,8 @@ h1,h2,h3,h4{color:var(--txt)!important;font-family:var(--fs)!important;}
   padding:2px 8px;border-radius:4px;margin-right:8px;
   white-space:nowrap;font-family:var(--fn);}
 .tape-inner{display:flex;white-space:nowrap;}
-.tape-inner.fast{animation:scroll 25s linear infinite;}
-.tape-inner.med{animation:scroll 40s linear infinite;}
+.tape-inner.fast{animation:scroll 60s linear infinite;}
+.tape-inner.med{animation:scroll 20s linear infinite;}
 .tape-inner:hover{animation-play-state:paused;}
 @keyframes scroll{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
 .t-item{display:inline-flex;align-items:center;gap:5px;padding:0 18px;
@@ -195,11 +190,6 @@ div[data-testid="stExpander"]>div>div{background:var(--panel)!important;}
   border:none!important;border-radius:7px!important;font-weight:600!important;
   font-size:13px!important;padding:5px 14px!important;transition:background .15s!important;}
 .stButton button:hover{background:#6044D8!important;}
-.refresh-btn .stButton button{background:#1C2128!important;
-  border:1px solid var(--border)!important;color:var(--txt2)!important;
-  font-size:12px!important;}
-.refresh-btn .stButton button:hover{background:var(--panel2)!important;
-  color:var(--txt)!important;}
 
 /* ── Radio ── */
 .stRadio>div{gap:6px!important;}
@@ -296,14 +286,6 @@ st.markdown(
     f'<span class="clock">{ist_now().strftime("%d %b %Y · %H:%M")} IST</span>'
     f'</div></div>',
     unsafe_allow_html=True)
-
-# Global Refresh button
-r_col1, r_col2 = st.columns([8,1])
-with r_col2:
-    st.markdown('<div class="refresh-btn">', unsafe_allow_html=True)
-    if st.button("↺ Refresh", key="global_refresh"):
-        _clear_all()
-    st.markdown('</div>', unsafe_allow_html=True)
 
 # ══ TICKERS (after header) ════════════════════════════════════════════════════
 # Global markets tape
