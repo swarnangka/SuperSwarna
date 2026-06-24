@@ -237,20 +237,19 @@ def global_ticker_data():
             "Gold":"GC=F","Crude":"CL=F","USD/INR":"USDINR=X",
             "Nifty":"^NSEI","BankNifty":"^NSEBANK"}
     out = []
-    try:
-        df = yf.download(list(syms.values()), period="2d",
-                         auto_adjust=True, progress=False, group_by="ticker")
-        for name, sym in syms.items():
-            try:
-                d = (df[sym] if len(syms)>1 else df).dropna()
+    for name, sym in syms.items():
+        try:
+            d = yf.download(sym, period="2d", auto_adjust=True,
+                           progress=False, timeout=8)
+            if d is not None and not d.empty:
+                d.columns = [c[0] if isinstance(c,tuple) else c for c in d.columns]
+                d = d.dropna()
                 if len(d) >= 2:
                     last = float(d["Close"].iloc[-1])
                     chg  = (last - float(d["Close"].iloc[-2])) / float(d["Close"].iloc[-2]) * 100
                     out.append({"name": name, "last": last, "chg": chg})
-            except Exception:
-                continue
-    except Exception:
-        pass
+        except Exception:
+            continue
     return out
 
 
@@ -584,7 +583,6 @@ with st.expander("Market Internals"):
                 ("Energy","^CNXENERGY"),("Realty","^CNXREALTY"),
                 ("Media","^CNXMEDIA"),("PSU Bank","^CNXPSUBANK"),
                 ("Infra","^CNXINFRA"),("MidCap","NIFTY_MIDCAP_100.NS"),
-                ("SmallCap","NIFTY_SMLCAP_100.NS"),
             ]
             sec_rows=[]
             for nm,sym in SECTOR_SYMS:
