@@ -413,19 +413,44 @@ st.markdown('<div class="sec"><span class="sec-title">Morning Brief</span>'
             '<span class="sec-line"></span></div>', unsafe_allow_html=True)
 
 with st.expander("Morning Brief", expanded=True):
+    # ── Once-per-day logic: key = YYYY-MM-DD, resets after 6AM IST ──
+    def _brief_day_key() -> str:
+        n = ist_now()
+        # If before 6AM, use previous calendar day as key
+        if n.hour < 6:
+            from datetime import timedelta
+            d = (n - timedelta(days=1)).date()
+        else:
+            d = n.date()
+        return f"brief_{d}"
+
+    today_key = _brief_day_key()
+    # Invalidate session cache if it's from a previous day
+    if st.session_state.get("brief_day_key") != today_key:
+        st.session_state.pop("brief_result", None)
+        st.session_state.pop("brief_gp", None)
+        st.session_state.pop("brief_lvls", None)
+        st.session_state.pop("brief_ts", None)
+        st.session_state.pop("brief_done", None)
+        st.session_state["brief_day_key"] = today_key
+
     mb1, mb2 = st.columns([2,5])
     with mb1:
         run_brief = st.button("Generate", key="brief_run")
     with mb2:
-        if st.session_state.get("brief_done"):
+        if st.session_state.get("brief_ts"):
             st.markdown(
                 f'<span style="font-size:11px;color:#484F58">'
-                f'Generated {st.session_state.get("brief_ts","today")}'
-                f' — cached for the day</span>', unsafe_allow_html=True)
+                f'Generated {st.session_state["brief_ts"]}'
+                f' — refreshes after 06:00 IST tomorrow</span>',
+                unsafe_allow_html=True)
 
     if run_brief:
-        st.session_state.pop("brief_result", None)
-        st.session_state["brief_done"] = True
+        # Only allow regeneration if not already generated today
+        if "brief_result" not in st.session_state:
+            st.session_state["brief_done"] = True
+        else:
+            st.session_state["brief_done"] = True  # show existing result
 
     if st.session_state.get("brief_done"):
         if "brief_result" not in st.session_state:
@@ -459,16 +484,18 @@ with st.expander("Morning Brief", expanded=True):
                     pass
                 ev_list=[f"{e['Type']}: {e['Event']}" for _,e in evts.iterrows()] if not evts.empty else None
                 res_list=res_df["Headline"].head(5).tolist() if not res_df.empty and "Headline" in res_df.columns else None
+            gen_ts = ist_now().strftime("%d %b %Y · %H:%M IST")
             with st.spinner("Writing brief…"):
                 synthesis = generate_synthesis(
                     gp, recap, lvls, news3,
                     sectors=sectors_dict or None,
                     events=ev_list, results=res_list,
-                    movers=movers_dict or None)
+                    movers=movers_dict or None,
+                    gen_ts=gen_ts)
             st.session_state["brief_result"] = synthesis
             st.session_state["brief_gp"]     = gp
             st.session_state["brief_lvls"]   = lvls
-            st.session_state["brief_ts"]     = ist_now().strftime("%d %b · %H:%M IST")
+            st.session_state["brief_ts"]     = gen_ts
         else:
             synthesis = st.session_state["brief_result"]
             gp   = st.session_state.get("brief_gp", {})
@@ -562,31 +589,63 @@ with st.expander("Market Internals"):
         with st.spinner(""):
             n50=nifty50(); ad=advance_decline(n50)
             gl=gainers_losers(); heat=nifty50_heatmap_yf()
-            # Fetch sector indices individually (fixes missing sectors)
+            # All 18 NSE sector indices — batch download then parse individually
             SECTOR_SYMS = [
-                ("IT","^CNXIT"),("Bank","^NSEBANK"),("Pharma","^CNXPHARMA"),
-                ("FMCG","^CNXFMCG"),("Metal","^CNXMETAL"),("Auto","^CNXAUTO"),
-                ("Energy","^CNXENERGY"),("Realty","^CNXREALTY"),
-                ("Media","^CNXMEDIA"),("PSU Bank","^CNXPSUBANK"),
-                ("Infra","^CNXINFRA"),("MidCap","NIFTY_MIDCAP_100.NS"),
+                ("IT",          "^CNXIT"),
+                ("Bank",        "^NSEBANK"),
+                ("Pharma",      "^CNXPHARMA"),
+                ("FMCG",        "^CNXFMCG"),
+                ("Metal",       "^CNXMETAL"),
+                ("Auto",        "^CNXAUTO"),
+                ("Energy",      "^CNXENERGY"),
+                ("Realty",      "^CNXREALTY"),
+                ("Media",       "^CNXMEDIA"),
+                ("PSU Bank",    "^CNXPSUBANK"),
+                ("Infra",       "^CNXINFRA"),
+                ("Fin Service", "^CNXFINANCE"),
+                ("Commodity",   "^CNXCMDT"),
+                ("Cons Durbl",  "^CNXCONSDUR"),
+                ("Healthcare",  "^CNXHEALTH"),
+                ("MNC",         "^CNXMNC"),
+                ("MidCap",      "NIFTY_MIDCAP_100.NS"),
+                ("MidCap 50",   "^NSEMDCP50"),
             ]
-            sec_rows=[]
-            for nm,sym in SECTOR_SYMS:
-                try:
-                    d=yf.download(sym,period="2d",auto_adjust=True,
-                                  progress=False,timeout=8)
-                    if d is not None and not d.empty:
-                        d.columns=[c[0] if isinstance(c,tuple) else c
-                                   for c in d.columns]
-                        d=d.dropna()
-                        if len(d)>=2:
-                            c2v=float(d["Close"].iloc[-1])
-                            p=float(d["Close"].iloc[-2])
-                            sec_rows.append({"Symbol":nm,
-                                            "Chg %":round((c2v-p)/p*100,2)})
-                except Exception:
-                    sec_rows.append({"Symbol":nm,"Chg %":0.0})
-            sec_heat=pd.DataFrame(sec_rows)
+            sec_rows = []
+            # Try batch first (faster), fall back to individual on failure
+            try:
+                all_syms = [s for _,s in SECTOR_SYMS]
+                batch = yf.download(all_syms, period="2d", auto_adjust=True,
+                                    progress=False, group_by="ticker", timeout=15)
+                for nm, sym in SECTOR_SYMS:
+                    try:
+                        d = batch[sym] if len(all_syms) > 1 else batch
+                        d = d.dropna()
+                        if len(d) >= 2:
+                            cv = float(d["Close"].iloc[-1])
+                            pv = float(d["Close"].iloc[-2])
+                            sec_rows.append({"Symbol": nm, "Chg %": round((cv-pv)/pv*100, 2)})
+                        else:
+                            sec_rows.append({"Symbol": nm, "Chg %": None})
+                    except Exception:
+                        sec_rows.append({"Symbol": nm, "Chg %": None})
+            except Exception:
+                # Individual fallback
+                for nm, sym in SECTOR_SYMS:
+                    try:
+                        d = yf.download(sym, period="2d", auto_adjust=True,
+                                        progress=False, timeout=8)
+                        if d is not None and not d.empty:
+                            d.columns = [c[0] if isinstance(c,tuple) else c for c in d.columns]
+                            d = d.dropna()
+                            if len(d) >= 2:
+                                cv = float(d["Close"].iloc[-1])
+                                pv = float(d["Close"].iloc[-2])
+                                sec_rows.append({"Symbol": nm, "Chg %": round((cv-pv)/pv*100, 2)})
+                                continue
+                    except Exception:
+                        pass
+                    sec_rows.append({"Symbol": nm, "Chg %": None})
+            sec_heat = pd.DataFrame(sec_rows)
 
         if ad["total"]==0 and not heat.empty:
             adv=int((heat["Chg %"]>0).sum()); dec=int((heat["Chg %"]<0).sum())
@@ -603,20 +662,31 @@ f'<div style="width:{apct:.0f}%;background:#2EC4A0"></div>'
 f'<div style="flex:1;background:#F85149"></div></div></div>',
                 unsafe_allow_html=True)
 
-        def render_hmap(df,cols=10):
+        def render_hmap(df, cols=10):
             if df.empty: return
-            cells=""
-            for _,row in df.iterrows():
-                v=row["Chg %"]
-                bg=("#1E8E74" if v>1 else "#2EC4A0" if v>0
-                    else "#484F58" if v==0 else "#F85149" if v>-1 else "#A32D2D")
-                cells+=(f'<div style="background:{bg};border-radius:5px;'
-                        f'padding:5px 3px;text-align:center">'
-                        f'<div style="font-size:9px;color:#fff;font-weight:600;'
-                        f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
-                        f'{row["Symbol"]}</div>'
-                        f'<div style="font-size:10px;color:#fff;font-family:monospace">'
-                        f'{v:+.1f}%</div></div>')
+            cells = ""
+            for _, row in df.iterrows():
+                v = row["Chg %"]
+                if v is None or (isinstance(v, float) and np.isnan(v)):
+                    bg = "#2D333B"
+                    label = "N/A"
+                    vstr = ""
+                else:
+                    bg = ("#1E8E74" if v > 1 else "#2EC4A0" if v > 0
+                          else "#484F58" if v == 0 else "#F85149" if v > -1 else "#A32D2D")
+                    label = f"{v:+.1f}%"
+                    vstr = label
+                cells += (f'<div style="background:{bg};border-radius:5px;'
+                          f'padding:5px 3px;text-align:center">'
+                          f'<div style="font-size:9px;color:#fff;font-weight:600;'
+                          f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+                          f'{row["Symbol"]}</div>'
+                          f'<div style="font-size:10px;color:#fff;font-family:monospace">'
+                          f'{vstr}</div></div>')
+            st.markdown(
+                f'<div style="display:grid;grid-template-columns:repeat({cols},1fr);'
+                f'gap:3px;margin-bottom:12px">{cells}</div>',
+                unsafe_allow_html=True)
             st.markdown(
                 f'<div style="display:grid;grid-template-columns:repeat({cols},1fr);'
                 f'gap:3px;margin-bottom:12px">{cells}</div>',
@@ -627,9 +697,9 @@ f'<div style="flex:1;background:#F85149"></div></div></div>',
             f'{"Nifty 50 constituent stocks" if hmap_mode=="Nifty 50 Stocks" else "Broad sector indices"} · % change</div>',
             unsafe_allow_html=True)
         if hmap_mode=="Nifty 50 Stocks":
-            render_hmap(heat,10)
+            render_hmap(heat, 10)
         else:
-            render_hmap(sec_heat,7)
+            render_hmap(sec_heat, 6)
 
         g1,g2=st.columns(2)
         with g1:

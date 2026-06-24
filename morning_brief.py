@@ -19,8 +19,10 @@ GLOBAL_SYMBOLS = {
     "Gold":     "GC=F",
     "Silver":   "SI=F",
     "US10Y":    "^TNX",
+    "VIX":      "^VIX",
     "Dow":      "^DJI",
     "Nasdaq":   "^IXIC",
+    "S&P 500":  "^GSPC",
     "GiftNifty":"^NSEI",
     "Nikkei":   "^N225",
     "HangSeng": "^HSI",
@@ -145,8 +147,8 @@ def fetch_top_news(max_items: int = 3) -> list:
 def generate_synthesis(global_pulse: dict, recap: dict, levels: dict,
                        news: list, sectors: dict = None,
                        events: list = None, results: list = None,
-                       movers: dict = None) -> str:
-    """Call Claude API once at 6AM IST. Cached all day. Never re-called."""
+                       movers: dict = None, gen_ts: str = None) -> str:
+    """Call Claude API once at 6AM IST. Cached all day in session state."""
     try:
         import anthropic, os
         api_key = None
@@ -182,78 +184,85 @@ def generate_synthesis(global_pulse: dict, recap: dict, levels: dict,
         dxy   = global_pulse.get("DXY", {})
         crude = global_pulse.get("Crude", {})
         gold  = global_pulse.get("Gold", {})
+        silver= global_pulse.get("Silver", {})
         dow   = global_pulse.get("Dow", {})
+        nasdaq= global_pulse.get("Nasdaq", {})
+        sp500 = global_pulse.get("S&P 500", {})
+        vix   = global_pulse.get("VIX", {})
+        us10y = global_pulse.get("US10Y", {})
         nifty = recap.get("Nifty 50", {})
         bnk   = recap.get("Bank Nifty", {})
         nifty_lvl = levels.get("Nifty 50", {})
 
-        # Sector strength/weakness
         sector_str = "Not available"
         if sectors:
-            strong = [f"{k} ({v:+.1f}%)" for k,v in sectors.items() if v > 0][:3]
-            weak   = [f"{k} ({v:+.1f}%)" for k,v in sectors.items() if v < 0][:3]
+            strong = [f"{k} ({v:+.1f}%)" for k,v in sectors.items() if v and v > 0][:3]
+            weak   = [f"{k} ({v:+.1f}%)" for k,v in sectors.items() if v and v < 0][:3]
             sector_str = (f"Strong: {', '.join(strong) if strong else 'none'}. "
                          f"Weak: {', '.join(weak) if weak else 'none'}.")
 
-        # Top movers
         movers_str = "Not available"
         if movers:
             gainers = movers.get("gainers", [])[:3]
             losers  = movers.get("losers", [])[:3]
-            movers_str = (f"Top gainers: {', '.join(gainers) if gainers else 'none'}. "
-                         f"Top losers: {', '.join(losers) if losers else 'none'}.")
+            movers_str = (f"Gainers: {', '.join(gainers) if gainers else 'none'}. "
+                         f"Losers: {', '.join(losers) if losers else 'none'}.")
 
-        # Events today
-        events_str = "No major events today."
-        if events:
-            events_str = "; ".join(events)
+        events_str  = "No major events today."
+        if events: events_str = "; ".join(events)
 
-        # Results today
         results_str = "No results due today."
-        if results:
-            results_str = "; ".join(results[:5])
+        if results: results_str = "; ".join(results[:5])
+
+        ts_line = f"Generated at {gen_ts}" if gen_ts else ""
 
         data_block = f"""
-GLOBAL CUES:
+{ts_line}
+
+US MARKET (previous session):
+Dow Jones: {fv(dow.get('last'),',.0f')} ({fv(dow.get('chg'),'+.2f')}%)
+Nasdaq: {fv(nasdaq.get('last'),',.0f')} ({fv(nasdaq.get('chg'),'+.2f')}%)
+S&P 500: {fv(sp500.get('last'),',.0f')} ({fv(sp500.get('chg'),'+.2f')}%)
+VIX: {fv(vix.get('last'))} ({fv(vix.get('chg'),'+.2f')}%)
+US 10Y Yield: {fv(us10y.get('last'))}%
+
+GLOBAL COMMODITIES & MACRO:
 DXY: {fv(dxy.get('last'))} ({fv(dxy.get('chg'),'+.2f')}%)
-Crude: ${fv(crude.get('last'))} ({fv(crude.get('chg'),'+.2f')}%)
-Gold: ${fv(gold.get('last'))} ({fv(gold.get('chg'),'+.2f')}%)
-Dow Jones: {fv(dow.get('chg'),'+.2f')}%
+Crude WTI: ${fv(crude.get('last'))} ({fv(crude.get('chg'),'+.2f')}%)
+Gold: ${fv(gold.get('last'),',.0f')} ({fv(gold.get('chg'),'+.2f')}%)
+Silver: ${fv(silver.get('last'))} ({fv(silver.get('chg'),'+.2f')}%)
 Headlines: {'; '.join(news) if news else 'None'}
 
 INDIAN MARKET (yesterday):
-Nifty: O={fv(nifty.get('open'))} H={fv(nifty.get('high'))} L={fv(nifty.get('low'))} C={fv(nifty.get('close'))} ({fv(nifty.get('chg'),'+.2f')}%)
-Bank Nifty: C={fv(bnk.get('close'))} ({fv(bnk.get('chg'),'+.2f')}%)
+Nifty 50: O={fv(nifty.get('open'),',.0f')} H={fv(nifty.get('high'),',.0f')} L={fv(nifty.get('low'),',.0f')} C={fv(nifty.get('close'),',.0f')} ({fv(nifty.get('chg'),'+.2f')}%)
+Bank Nifty: C={fv(bnk.get('close'),',.0f')} ({fv(bnk.get('chg'),'+.2f')}%)
 Key levels: S2={nifty_lvl.get('S2','N/A')} S1={nifty_lvl.get('S1','N/A')} R1={nifty_lvl.get('R1','N/A')} R2={nifty_lvl.get('R2','N/A')}
 
-SECTORS (yesterday):
-{sector_str}
-
-MOVERS (yesterday):
-{movers_str}
-
+SECTORS (yesterday): {sector_str}
+MOVERS (yesterday): {movers_str}
 TODAY'S EVENTS: {events_str}
-TODAY'S RESULTS: {results_str}
+TODAY'S RESULTS DUE: {results_str}
 """
 
         system = """You write a morning market brief for Indian equity traders. 4 tight paragraphs.
 
-Para 1 — Global cues: DXY/crude/gold direction and what it means for India today. 40-50 words.
-Para 2 — Index structure: Nifty/BankNifty key level to hold or break today. Be specific with numbers. 40-50 words.
-Para 3 — Sectors and movers: which sectors showing strength or weakness, any stocks to watch. If results are due, name them. If no events or results, explicitly say so. 40-50 words.
-Para 4 — Playbook: one clear action bias for the session. What to do, what to avoid. 30-40 words.
+Para 1 — US market overview: summarise Dow/Nasdaq/S&P direction, VIX reading, 10Y yield, and what it signals. 40-50 words.
+Para 2 — Global macro + Indian index structure: DXY/crude/gold implication for India, then Nifty/BankNifty key level to hold or break today. Specific numbers. 40-50 words.
+Para 3 — Sectors, movers, events and results: which sectors strong or weak, stocks to watch. Name any results due today explicitly. If no events or results, say so clearly. 40-50 words.
+Para 4 — Playbook: one clear action bias for the session. 30-40 words.
 
-Rules:
+Style rules (non-negotiable):
 - Direct, declarative, confident. Like a senior trader wrote this at 5:45 AM.
-- No bullets. No emoji. No hedging. No "it appears" or "it seems" or "it is worth noting".
-- Do not mention being an AI.
-- Specific numbers must appear as digits, not words.
-- Start directly — no title, no date, no greeting."""
+- No bullet points. No emoji. No hedging language like "it appears" or "it seems".
+- Do not mention AI. Write as a human desk note.
+- Numbers as digits always.
+- Start the first paragraph with the generation timestamp on its own line: "Brief as of {gen_ts}" then a blank line, then the content.
+- No greeting, no title other than the timestamp line."""
 
         client = anthropic.Anthropic(api_key=api_key)
         msg = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=500,
+            max_tokens=600,
             system=system,
             messages=[{"role": "user",
                        "content": f"Write today's morning brief:\n{data_block}"}])

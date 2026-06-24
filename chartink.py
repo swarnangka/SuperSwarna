@@ -40,12 +40,10 @@ TAPE_SCANS = {
     },
     "ATR": {
         "slug": "swarna-atr",
-        # ATR momentum: price makes 52W high AND closes above upper Bollinger + high volume
-        # This approximates an ATR-based breakout scan
+        # Exact clause from swarna-atr: daily move >= 21-day ATR
         "fallback": (
-            "( {33489} ( daily close >= daily max( 240 , daily close ) and "
-            "daily volume >= daily sma( volume , 10 ) * 2 and "
-            "daily close >= daily ema( close , 20 ) ) )"
+            "( {33489} ( ( daily close - daily open ) >= "
+            "daily avg true range( 21 ) ) )"
         ),
     },
 }
