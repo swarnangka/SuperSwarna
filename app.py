@@ -568,62 +568,44 @@ with st.expander("Market Internals"):
         with st.spinner(""):
             n50=nifty50(); ad=advance_decline(n50)
             gl=gainers_losers(); heat=nifty50_heatmap_yf()
-            # All 18 NSE sector indices — batch download then parse individually
+            # Correct Yahoo Finance symbols for NSE sector indices
+            # ^CNX prefix works for IT/Bank/Pharma; others need .NS suffix
             SECTOR_SYMS = [
                 ("IT",          "^CNXIT"),
                 ("Bank",        "^NSEBANK"),
                 ("Pharma",      "^CNXPHARMA"),
-                ("FMCG",        "^CNXFMCG"),
-                ("Metal",       "^CNXMETAL"),
-                ("Auto",        "^CNXAUTO"),
-                ("Energy",      "^CNXENERGY"),
-                ("Realty",      "^CNXREALTY"),
-                ("Media",       "^CNXMEDIA"),
-                ("PSU Bank",    "^CNXPSUBANK"),
-                ("Infra",       "^CNXINFRA"),
-                ("Fin Service", "^CNXFINANCE"),
-                ("Commodity",   "^CNXCMDT"),
-                ("Cons Durbl",  "^CNXCONSDUR"),
-                ("Healthcare",  "^CNXHEALTH"),
-                ("MNC",         "^CNXMNC"),
+                ("FMCG",        "CNXFMCG.NS"),
+                ("Metal",       "CNXMETAL.NS"),
+                ("Auto",        "CNXAUTO.NS"),
+                ("Energy",      "CNXENERGY.NS"),
+                ("Realty",      "CNXREALTY.NS"),
+                ("Media",       "CNXMEDIA.NS"),
+                ("PSU Bank",    "CNXPSUBANK.NS"),
+                ("Infra",       "CNXINFRA.NS"),
+                ("Fin Service", "CNXFINANCE.NS"),
+                ("Healthcare",  "CNXHEALTH.NS"),
+                ("Cons Durbl",  "CNXCONSDUR.NS"),
                 ("MidCap",      "NIFTY_MIDCAP_100.NS"),
-                ("MidCap 50",   "^NSEMDCP50"),
+                ("Mid+Sml",     "NIFTY_MIDSML_400.NS"),
             ]
             sec_rows = []
-            # Try batch first (faster), fall back to individual on failure
-            try:
-                all_syms = [s for _,s in SECTOR_SYMS]
-                batch = yf.download(all_syms, period="2d", auto_adjust=True,
-                                    progress=False, group_by="ticker", timeout=15)
-                for nm, sym in SECTOR_SYMS:
-                    try:
-                        d = batch[sym] if len(all_syms) > 1 else batch
+            # Fetch each sector individually — batch fails for most NSE sector syms
+            for nm, sym in SECTOR_SYMS:
+                chg = None
+                try:
+                    d = yf.download(sym, period="2d", auto_adjust=True,
+                                    progress=False, timeout=8)
+                    if d is not None and not d.empty:
+                        d.columns = [c[0] if isinstance(c,tuple) else c
+                                     for c in d.columns]
                         d = d.dropna()
                         if len(d) >= 2:
                             cv = float(d["Close"].iloc[-1])
                             pv = float(d["Close"].iloc[-2])
-                            sec_rows.append({"Symbol": nm, "Chg %": round((cv-pv)/pv*100, 2)})
-                        else:
-                            sec_rows.append({"Symbol": nm, "Chg %": None})
-                    except Exception:
-                        sec_rows.append({"Symbol": nm, "Chg %": None})
-            except Exception:
-                # Individual fallback
-                for nm, sym in SECTOR_SYMS:
-                    try:
-                        d = yf.download(sym, period="2d", auto_adjust=True,
-                                        progress=False, timeout=8)
-                        if d is not None and not d.empty:
-                            d.columns = [c[0] if isinstance(c,tuple) else c for c in d.columns]
-                            d = d.dropna()
-                            if len(d) >= 2:
-                                cv = float(d["Close"].iloc[-1])
-                                pv = float(d["Close"].iloc[-2])
-                                sec_rows.append({"Symbol": nm, "Chg %": round((cv-pv)/pv*100, 2)})
-                                continue
-                    except Exception:
-                        pass
-                    sec_rows.append({"Symbol": nm, "Chg %": None})
+                            chg = round((cv - pv) / pv * 100, 2)
+                except Exception:
+                    pass
+                sec_rows.append({"Symbol": nm, "Chg %": chg})
             sec_heat = pd.DataFrame(sec_rows)
 
         if ad["total"]==0 and not heat.empty:
@@ -662,10 +644,6 @@ f'<div style="flex:1;background:#F85149"></div></div></div>',
                           f'{row["Symbol"]}</div>'
                           f'<div style="font-size:10px;color:#fff;font-family:monospace">'
                           f'{vstr}</div></div>')
-            st.markdown(
-                f'<div style="display:grid;grid-template-columns:repeat({cols},1fr);'
-                f'gap:3px;margin-bottom:12px">{cells}</div>',
-                unsafe_allow_html=True)
             st.markdown(
                 f'<div style="display:grid;grid-template-columns:repeat({cols},1fr);'
                 f'gap:3px;margin-bottom:12px">{cells}</div>',
