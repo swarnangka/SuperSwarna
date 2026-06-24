@@ -295,13 +295,12 @@ st.markdown(
     f'<div class="tape-wrap tape-global">{g_html}</div>',
     unsafe_allow_html=True)
 
-# Scan tapes — 52WH, MM, ATR only (badge sits outside scroll area)
+# Scan tapes — 52WH and MM only
 BADGE_COLORS = {
     "52WH": ("#7C5CFC", "#fff"),
     "MM":   ("#2EC4A0", "#0D1117"),
-    "ATR":  ("#F85149", "#fff"),
 }
-for tape_label, info in TAPE_SCANS.items():
+for tape_label in ["52WH", "MM"]:
     tape_items = fetch_tape_scan(tape_label)
     tape_html  = build_scan_tape_html(tape_items, "med")
     bg, fg = BADGE_COLORS.get(tape_label, ("#484F58","#fff"))
@@ -493,35 +492,15 @@ with st.expander("Morning Brief", expanded=True):
                     movers=movers_dict or None,
                     gen_ts=gen_ts)
             st.session_state["brief_result"] = synthesis
-            st.session_state["brief_gp"]     = gp
-            st.session_state["brief_lvls"]   = lvls
             st.session_state["brief_ts"]     = gen_ts
         else:
             synthesis = st.session_state["brief_result"]
-            gp   = st.session_state.get("brief_gp", {})
-            lvls = st.session_state.get("brief_lvls", {})
 
         para_html = "".join(f"<p>{p.strip()}</p>"
                             for p in synthesis.split("\n\n") if p.strip())
-        gp_rows = ""
-        for label,key,fmt in [("DXY","DXY",",.2f"),("Crude","Crude",",.2f"),
-                               ("Gold","Gold",",.2f"),("Dow","Dow","+,.2f"),
-                               ("Nasdaq","Nasdaq","+,.2f")]:
-            d=gp.get(key,{}); v=d.get("last"); c=d.get("chg")
-            vstr=f"{v:{fmt}}" if v else "—"
-            cstr=(f'<span class="{"t-up" if c and c>=0 else "t-dn"}">{fmt_chg(c)}</span>'
-                  if c is not None else "—")
-            gp_rows+=f'<div class="bt-row"><span class="bt-label">{label}</span><span class="bt-val">{vstr} {cstr}</span></div>'
-        nf=lvls.get("Nifty 50",{})
-        lvl_rows=""
-        for lbl,k in [("S2","S2"),("S1 / Bias","S1"),("R1","R1"),("R2","R2")]:
-            lvl_rows+=f'<div class="bt-row"><span class="bt-label">{lbl}</span><span class="bt-val">{nf.get(k,"—")}</span></div>'
         st.markdown(
-f'<div class="brief-wrap"><div class="brief-text">{para_html}</div>'
-f'<div class="brief-grid">'
-f'<div class="brief-table"><div class="bt-title">Global Pulse</div>{gp_rows}</div>'
-f'<div class="brief-table"><div class="bt-title">Nifty Key Levels</div>{lvl_rows}</div>'
-f'</div></div>', unsafe_allow_html=True)
+f'<div class="brief-wrap"><div class="brief-text">{para_html}</div></div>',
+            unsafe_allow_html=True)
     else:
         st.markdown('<span style="color:#484F58;font-size:13px">'
                     'Click Generate for today\'s morning brief.</span>',

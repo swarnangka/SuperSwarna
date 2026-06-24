@@ -18,6 +18,7 @@ GLOBAL_SYMBOLS = {
     "Crude":    "CL=F",
     "Gold":     "GC=F",
     "Silver":   "SI=F",
+    "Copper":   "HG=F",
     "US10Y":    "^TNX",
     "VIX":      "^VIX",
     "Dow":      "^DJI",
@@ -181,18 +182,20 @@ def generate_synthesis(global_pulse: dict, recap: dict, levels: dict,
             try: return f"{v:{fmt}}"
             except: return str(v)
 
-        dxy   = global_pulse.get("DXY", {})
-        crude = global_pulse.get("Crude", {})
-        gold  = global_pulse.get("Gold", {})
-        silver= global_pulse.get("Silver", {})
-        dow   = global_pulse.get("Dow", {})
-        nasdaq= global_pulse.get("Nasdaq", {})
-        sp500 = global_pulse.get("S&P 500", {})
-        vix   = global_pulse.get("VIX", {})
-        us10y = global_pulse.get("US10Y", {})
-        nifty = recap.get("Nifty 50", {})
-        bnk   = recap.get("Bank Nifty", {})
+        dxy    = global_pulse.get("DXY", {})
+        crude  = global_pulse.get("Crude", {})
+        gold   = global_pulse.get("Gold", {})
+        silver = global_pulse.get("Silver", {})
+        copper = global_pulse.get("Copper", {})
+        dow    = global_pulse.get("Dow", {})
+        nasdaq = global_pulse.get("Nasdaq", {})
+        sp500  = global_pulse.get("S&P 500", {})
+        vix    = global_pulse.get("VIX", {})
+        us10y  = global_pulse.get("US10Y", {})
+        nifty  = recap.get("Nifty 50", {})
+        bnk    = recap.get("Bank Nifty", {})
         nifty_lvl = levels.get("Nifty 50", {})
+        bnk_lvl   = levels.get("Bank Nifty", {})
 
         sector_str = "Not available"
         if sectors:
@@ -226,17 +229,19 @@ S&P 500: {fv(sp500.get('last'),',.0f')} ({fv(sp500.get('chg'),'+.2f')}%)
 VIX: {fv(vix.get('last'))} ({fv(vix.get('chg'),'+.2f')}%)
 US 10Y Yield: {fv(us10y.get('last'))}%
 
-GLOBAL COMMODITIES & MACRO:
+GLOBAL MACRO:
 DXY: {fv(dxy.get('last'))} ({fv(dxy.get('chg'),'+.2f')}%)
 Crude WTI: ${fv(crude.get('last'))} ({fv(crude.get('chg'),'+.2f')}%)
 Gold: ${fv(gold.get('last'),',.0f')} ({fv(gold.get('chg'),'+.2f')}%)
 Silver: ${fv(silver.get('last'))} ({fv(silver.get('chg'),'+.2f')}%)
+Copper: ${fv(copper.get('last'))} ({fv(copper.get('chg'),'+.2f')}%)
 Headlines: {'; '.join(news) if news else 'None'}
 
 INDIAN MARKET (yesterday):
 Nifty 50: O={fv(nifty.get('open'),',.0f')} H={fv(nifty.get('high'),',.0f')} L={fv(nifty.get('low'),',.0f')} C={fv(nifty.get('close'),',.0f')} ({fv(nifty.get('chg'),'+.2f')}%)
 Bank Nifty: C={fv(bnk.get('close'),',.0f')} ({fv(bnk.get('chg'),'+.2f')}%)
-Key levels: S2={nifty_lvl.get('S2','N/A')} S1={nifty_lvl.get('S1','N/A')} R1={nifty_lvl.get('R1','N/A')} R2={nifty_lvl.get('R2','N/A')}
+Nifty key levels: S2={nifty_lvl.get('S2','N/A')} S1={nifty_lvl.get('S1','N/A')} R1={nifty_lvl.get('R1','N/A')} R2={nifty_lvl.get('R2','N/A')}
+BankNifty key levels: S2={bnk_lvl.get('S2','N/A')} S1={bnk_lvl.get('S1','N/A')} R1={bnk_lvl.get('R1','N/A')} R2={bnk_lvl.get('R2','N/A')}
 
 SECTORS (yesterday): {sector_str}
 MOVERS (yesterday): {movers_str}
@@ -244,20 +249,21 @@ TODAY'S EVENTS: {events_str}
 TODAY'S RESULTS DUE: {results_str}
 """
 
-        system = """You write a morning market brief for Indian equity traders. 4 tight paragraphs.
+        system = f"""You write a morning market brief for Indian equity traders. Exactly 5 paragraphs. No bullets. No emoji. Direct, declarative prose like a senior trader wrote it at 5:45 AM.
 
-Para 1 — US market overview: summarise Dow/Nasdaq/S&P direction, VIX reading, 10Y yield, and what it signals. 40-50 words.
-Para 2 — Global macro + Indian index structure: DXY/crude/gold implication for India, then Nifty/BankNifty key level to hold or break today. Specific numbers. 40-50 words.
-Para 3 — Sectors, movers, events and results: which sectors strong or weak, stocks to watch. Name any results due today explicitly. If no events or results, say so clearly. 40-50 words.
-Para 4 — Playbook: one clear action bias for the session. 30-40 words.
+Start with one line: "Brief as of {gen_ts or 'today'}" then blank line, then the 5 paragraphs.
 
-Style rules (non-negotiable):
-- Direct, declarative, confident. Like a senior trader wrote this at 5:45 AM.
-- No bullet points. No emoji. No hedging language like "it appears" or "it seems".
-- Do not mention AI. Write as a human desk note.
-- Numbers as digits always.
-- Start the first paragraph with the generation timestamp on its own line: "Brief as of {gen_ts}" then a blank line, then the content.
-- No greeting, no title other than the timestamp line."""
+Para 1 — US session recap: Dow/Nasdaq/S&P % move, VIX reading (fear or complacency), 10Y yield direction. State clearly if it was a risk-on or risk-off US session. 45-55 words.
+
+Para 2 — Global macro for India: DXY direction (implications for FII flows), crude (implications for inflation and CAD), gold/silver/copper direction. What gift Nifty or Asian cues suggest for India open. 45-55 words.
+
+Para 3 — India index setup: State Nifty close and the critical level to watch today (give the actual S1/S2/R1/R2 numbers). Do the same for BankNifty. State whether the Swarna risk indicator is LOW/MODERATE/HIGH based on data given. 50-60 words.
+
+Para 4 — Sectors and momentum stocks: which sectors showed strength or weakness. Name any 52-week high stocks or ATR movers if provided. Name any stocks reporting results today — if none, say "No results due today." If no events, say "No scheduled events today." 50-60 words.
+
+Para 5 — Trade strategy: one clear bias for the session. Risk ON or Risk OFF. What to buy, what to avoid, where to focus. 35-45 words.
+
+Rules: numbers always as digits. No hedging. No "it appears" or "it seems". Do not mention AI."""
 
         client = anthropic.Anthropic(api_key=api_key)
         msg = client.messages.create(
