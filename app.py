@@ -334,70 +334,136 @@ f'<span style="color:#8B949E;font-size:11px;margin-left:20px">{c["detail"]}</spa
 # ═══ SECTION 2 — MORNING BRIEF ═════════════════════════════════════════════════
 st.markdown('<div class="sec"><span class="sec-title">Morning Brief</span>'
             '<span class="sec-line"></span></div>', unsafe_allow_html=True)
-mb1, mb2 = st.columns([1,4])
-with mb1:
-    run_brief = st.button("Generate", key="brief_run")
+
+with st.expander("Morning Brief — click to expand / collapse", expanded=True):
+    mb1, mb2 = st.columns([1,4])
+    with mb1:
+        run_brief = st.button("Generate", key="brief_run")
+    with mb2:
+        if st.session_state.get("brief_done"):
+            st.markdown(
+                f'<span style="font-size:11px;color:#484F58">'
+                f'Generated {st.session_state.get("brief_ts","today")} · '
+                f'cached for the day — click Generate to force refresh</span>',
+                unsafe_allow_html=True)
+
+    if run_brief:
+        # Clear cache so fresh generation happens
+        st.session_state.pop("brief_result", None)
+        st.session_state["brief_done"] = True
+
     if st.session_state.get("brief_done"):
-        if st.button("Clear", key="brief_clear"):
-            st.session_state["brief_done"] = False
-            st.rerun()
-if run_brief:
-    st.session_state["brief_done"] = True
-if st.session_state.get("brief_done"):
-    with st.spinner("Fetching market data…"):
-        gp    = fetch_global_pulse()
-        recap = fetch_indian_recap()
-        lvls  = compute_key_levels(recap)
-        news3 = fetch_top_news(3)
-    with st.spinner("Writing brief…"):
-        synthesis = generate_synthesis(gp, recap, lvls, news3)
-    # Render compact brief
-    para_html = "".join(f"<p>{p.strip()}</p>" for p in synthesis.split("\n\n") if p.strip())
-    # Global pulse mini table
-    gp_rows = ""
-    for label, key, fmt in [
-        ("DXY","DXY",",.2f"),("Crude","Crude",",.2f"),
-        ("Gold","Gold",",.2f"),("Dow","Dow","+,.2f"),("Nasdaq","Nasdaq","+,.2f")]:
-        d=gp.get(key,{}); v=d.get("last"); c=d.get("chg")
-        vstr=f"{v:{fmt}}" if v else "—"
-        cstr=f'<span class="{"t-up" if c and c>=0 else "t-dn"}">{fmt_chg(c)}</span>' if c else "—"
-        gp_rows+=f'<div class="bt-row"><span class="bt-label">{label}</span><span class="bt-val">{vstr} {cstr}</span></div>'
-    # Nifty levels mini table
-    nf=lvls.get("Nifty 50",{})
-    lvl_rows=""
-    for lbl,k in [("S2","S2"),("S1 / Bias","S1"),("R1","R1"),("R2","R2")]:
-        v=nf.get(k,"—")
-        lvl_rows+=f'<div class="bt-row"><span class="bt-label">{lbl}</span><span class="bt-val">{v}</span></div>'
-    st.markdown(
+        if "brief_result" not in st.session_state:
+            with st.spinner("Fetching market data…"):
+                gp    = fetch_global_pulse()
+                recap = fetch_indian_recap()
+                lvls  = compute_key_levels(recap)
+                news3 = fetch_top_news(3)
+                evts  = events_window(1)  # only today
+                results_df = results_today()
+                # Build sector dict from Yahoo sector data
+                sectors_dict = {}
+                try:
+                    import yfinance as yf
+                    sec_syms = {"IT":"^CNXIT","Bank":"^NSEBANK","Pharma":"^CNXPHARMA",
+                                "FMCG":"^CNXFMCG","Metal":"^CNXMETAL","Auto":"^CNXAUTO"}
+                    for nm,sym in sec_syms.items():
+                        d=yf.download(sym,period="2d",auto_adjust=True,progress=False)
+                        if d is not None and len(d)>=2:
+                            d.columns=[c[0] if isinstance(c,tuple) else c for c in d.columns]
+                            c=float(d["Close"].iloc[-1]); p=float(d["Close"].iloc[-2])
+                            sectors_dict[nm]=round((c-p)/p*100,2)
+                except Exception:
+                    pass
+                # Build movers from NSE gainers/losers if available
+                movers_dict = {}
+                try:
+                    from market_web import gainers_losers
+                    gl = gainers_losers()
+                    if not gl["gainers"].empty and "Symbol" in gl["gainers"].columns:
+                        movers_dict["gainers"] = gl["gainers"]["Symbol"].head(3).tolist()
+                    if not gl["losers"].empty and "Symbol" in gl["losers"].columns:
+                        movers_dict["losers"]  = gl["losers"]["Symbol"].head(3).tolist()
+                except Exception:
+                    pass
+                # Events list
+                ev_list = []
+                if not evts.empty:
+                    for _,e in evts.iterrows():
+                        ev_list.append(f"{e['Type']}: {e['Event']}")
+                res_list = []
+                if not results_df.empty and "Headline" in results_df.columns:
+                    res_list = results_df["Headline"].head(5).tolist()
+            with st.spinner("Writing brief…"):
+                synthesis = generate_synthesis(
+                    gp, recap, lvls, news3,
+                    sectors=sectors_dict,
+                    events=ev_list if ev_list else None,
+                    results=res_list if res_list else None,
+                    movers=movers_dict if movers_dict else None)
+            from datetime import datetime
+            st.session_state["brief_result"] = synthesis
+            st.session_state["brief_gp"]     = gp
+            st.session_state["brief_lvls"]   = lvls
+            st.session_state["brief_ts"]     = ist_now().strftime("%d %b · %H:%M IST")
+        else:
+            synthesis = st.session_state["brief_result"]
+            gp    = st.session_state.get("brief_gp", {})
+            lvls  = st.session_state.get("brief_lvls", {})
+
+        # Render
+        para_html = "".join(f"<p>{p.strip()}</p>" for p in synthesis.split("\n\n") if p.strip())
+        gp_rows = ""
+        for label, key, fmt in [
+            ("DXY","DXY",",.2f"),("Crude","Crude",",.2f"),
+            ("Gold","Gold",",.2f"),("Dow","Dow","+,.2f"),("Nasdaq","Nasdaq","+,.2f")]:
+            d=gp.get(key,{}); v=d.get("last"); c=d.get("chg")
+            vstr=f"{v:{fmt}}" if v else "—"
+            cstr=(f'<span class="{"t-up" if c and c>=0 else "t-dn"}">{fmt_chg(c)}</span>'
+                  if c is not None else "—")
+            gp_rows+=f'<div class="bt-row"><span class="bt-label">{label}</span><span class="bt-val">{vstr} {cstr}</span></div>'
+        nf=lvls.get("Nifty 50",{})
+        lvl_rows=""
+        for lbl,k in [("S2","S2"),("S1 / Bias","S1"),("R1","R1"),("R2","R2")]:
+            v=nf.get(k,"—")
+            lvl_rows+=f'<div class="bt-row"><span class="bt-label">{lbl}</span><span class="bt-val">{v}</span></div>'
+        st.markdown(
 f'<div class="brief-wrap">'
 f'<div class="brief-text">{para_html}</div>'
 f'<div class="brief-grid">'
 f'<div class="brief-table"><div class="bt-title">Global Pulse</div>{gp_rows}</div>'
 f'<div class="brief-table"><div class="bt-title">Nifty Key Levels</div>{lvl_rows}</div>'
 f'</div></div>', unsafe_allow_html=True)
-else:
-    st.markdown('<span style="color:#484F58;font-size:13px">Click Generate for today\'s morning brief.</span>',
-                unsafe_allow_html=True)
+    else:
+        st.markdown('<span style="color:#484F58;font-size:13px">'
+                    'Click Generate for today\'s morning brief.</span>',
+                    unsafe_allow_html=True)
 
 # ═══ SECTION 3 — HHLL COMMODITY SIGNALS ════════════════════════════════════════
 st.markdown('<div class="sec"><span class="sec-title">Commodity Signals · HHLL (29) · USD</span>'
             '<span class="sec-line"></span></div>', unsafe_allow_html=True)
-with st.spinner(""):
-    sigs = get_hhll_signals()
 
-for tf_label, tf_key in [("1-Hour — short term", "1H"), ("4-Hour — medium term", "4H")]:
-    st.markdown(f'<div class="tf-hdr">{tf_label}</div>', unsafe_allow_html=True)
-    hcols = st.columns(3)
-    for ci, (name, data) in enumerate(sigs.items()):
-        with hcols[ci]:
-            s = data[tf_key]; sig = s["signal"]
-            price = s["price"]; upper = s["upper"]; lower = s["lower"]; crossed = s["crossed"]
-            top_col = "#2EC4A0" if sig=="LONG" else "#F85149" if sig=="SHORT" else "#484F58"
-            pill_cls = "lp" if sig=="LONG" else "sp" if sig=="SHORT" else "np"
-            price_str = f"{price:,.3f}" if price else "—"
-            upper_str = f"{upper:,.3f}" if upper else "—"
-            lower_str = f"{lower:,.3f}" if lower else "—"
-            st.markdown(
+with st.expander("Commodity Signals — click to expand / collapse", expanded=True):
+    with st.spinner(""):
+        sigs = get_hhll_signals()
+    now_str = ist_now().strftime("%d %b · %H:%M IST")
+
+    for tf_label, tf_key in [("1-Hour — short term", "1H"), ("4-Hour — medium term", "4H")]:
+        st.markdown(f'<div class="tf-hdr">{tf_label}</div>', unsafe_allow_html=True)
+        hcols = st.columns(3)
+        for ci, (name, data) in enumerate(sigs.items()):
+            with hcols[ci]:
+                s = data[tf_key]; sig = s["signal"]
+                price = s["price"]; upper = s["upper"]; lower = s["lower"]
+                crossed = s["crossed"]
+                # Signal timestamp = current fetch time (signal is based on latest bar)
+                sig_ts = now_str if sig != "NO DATA" else "—"
+                top_col = "#2EC4A0" if sig=="LONG" else "#F85149" if sig=="SHORT" else "#484F58"
+                pill_cls = "lp" if sig=="LONG" else "sp" if sig=="SHORT" else "np"
+                price_str = f"{price:,.3f}" if price else "—"
+                upper_str = f"{upper:,.3f}" if upper else "—"
+                lower_str = f"{lower:,.3f}" if lower else "—"
+                st.markdown(
 f'<div class="hl-card">'
 f'<div class="hl-top" style="background:{top_col}"></div>'
 f'<div class="hl-com">{name}</div>'
@@ -408,16 +474,20 @@ f'<div class="hl-bands">'
 f'<span>Upper {upper_str}</span>'
 f'<span>Lower {lower_str}</span>'
 f'<span style="color:#484F58">{crossed}</span>'
+f'<span style="color:#484F58;font-size:10px">Signal as of {sig_ts}</span>'
 f'</div></div>', unsafe_allow_html=True)
-    if tf_key == "1H":
-        st.markdown('<div class="hdiv"></div>', unsafe_allow_html=True)
+        if tf_key == "1H":
+            st.markdown('<div class="hdiv"></div>', unsafe_allow_html=True)
 
 # ═══ COLLAPSIBLE SECTIONS ═══════════════════════════════════════════════════════
 with st.expander("Market Internals"):
-    ic1, ic2 = st.columns([1,1])
+    ic1, ic2, ic3 = st.columns([1,2,1])
     with ic1:
         run_int = st.button("Load", key="int_run")
     with ic2:
+        hmap_mode = st.radio("Heatmap", ["Nifty 50 Stocks","Sector Indices"],
+                             horizontal=True, key="hmap_mode", label_visibility="collapsed")
+    with ic3:
         if st.session_state.get("int_done"):
             if st.button("Clear", key="int_clr"):
                 st.session_state["int_done"] = False
@@ -425,35 +495,96 @@ with st.expander("Market Internals"):
     if run_int: st.session_state["int_done"] = True
     if st.session_state.get("int_done"):
         with st.spinner(""):
+            import yfinance as yf
             n50=nifty50(); ad=advance_decline(n50)
             gl=gainers_losers(); heat=nifty50_heatmap_yf()
+
+            # Sector indices heatmap data
+            SECTOR_SYMS = {
+                "IT":        "^CNXIT",
+                "Bank":      "^NSEBANK",
+                "Pharma":    "^CNXPHARMA",
+                "FMCG":      "^CNXFMCG",
+                "Metal":     "^CNXMETAL",
+                "Auto":      "^CNXAUTO",
+                "Energy":    "^CNXENERGY",
+                "Realty":    "^CNXREALTY",
+                "Media":     "^CNXMEDIA",
+                "PSU Bank":  "^CNXPSUBANK",
+                "Infra":     "^CNXINFRA",
+                "MidCap":    "NIFTY_MIDCAP_100.NS",
+                "SmallCap":  "NIFTY_SMLCAP_100.NS",
+            }
+            sec_rows = []
+            try:
+                sec_df = yf.download(list(SECTOR_SYMS.values()), period="2d",
+                                     auto_adjust=True, progress=False, group_by="ticker")
+                for nm, sym in SECTOR_SYMS.items():
+                    try:
+                        d = (sec_df[sym] if len(SECTOR_SYMS)>1 else sec_df).dropna()
+                        if len(d) >= 2:
+                            c=float(d["Close"].iloc[-1]); p=float(d["Close"].iloc[-2])
+                            sec_rows.append({"Symbol": nm, "Chg %": round((c-p)/p*100,2)})
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            sec_heat = pd.DataFrame(sec_rows)
+
+        # A/D meter
         if ad["total"]==0 and not heat.empty:
             adv=int((heat["Chg %"]>0).sum()); dec=int((heat["Chg %"]<0).sum())
             ad={"adv":adv,"dec":dec,"total":len(heat)}
         if ad["total"]>0:
             adv_pct=ad["adv"]/ad["total"]*100
             st.markdown(
-f'<div class="ad-wrap"><div class="ad-hdr"><span>Advance / Decline · Nifty 50</span>'
-f'<span><span style="color:#2EC4A0">{ad["adv"]} adv</span> · <span style="color:#F85149">{ad["dec"]} dec</span></span></div>'
+f'<div class="ad-wrap"><div class="ad-hdr">'
+f'<span>Advance / Decline · Nifty 50</span>'
+f'<span><span style="color:#2EC4A0">{ad["adv"]} adv</span> · '
+f'<span style="color:#F85149">{ad["dec"]} dec</span></span></div>'
 f'<div class="ad-bar"><div style="width:{adv_pct}%;background:#2EC4A0"></div>'
-f'<div style="flex:1;background:#F85149"></div></div></div>', unsafe_allow_html=True)
-        if not heat.empty:
+f'<div style="flex:1;background:#F85149"></div></div></div>',
+                unsafe_allow_html=True)
+
+        # Heatmap — stocks or sectors
+        def render_heatmap(df, cols=10):
+            if df.empty: return
             cells=""
-            for _,row in heat.iterrows():
+            for _,row in df.iterrows():
                 v=row["Chg %"]
-                bg="#1E8E74" if v>1 else "#2EC4A0" if v>0 else "#484F58" if v==0 else "#F85149" if v>-1 else "#A32D2D"
-                cells+=(f'<div style="background:{bg};border-radius:5px;padding:5px 3px;text-align:center">'
-                        f'<div style="font-size:9px;color:#fff;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{row["Symbol"]}</div>'
-                        f'<div style="font-size:10px;color:#fff;font-family:monospace">{v:+.1f}%</div></div>')
-            st.markdown(f'<div style="display:grid;grid-template-columns:repeat(10,1fr);gap:3px;margin-bottom:12px">{cells}</div>', unsafe_allow_html=True)
+                bg=("#1E8E74" if v>1 else "#2EC4A0" if v>0
+                    else "#484F58" if v==0 else "#F85149" if v>-1 else "#A32D2D")
+                cells+=(f'<div style="background:{bg};border-radius:5px;'
+                        f'padding:5px 3px;text-align:center">'
+                        f'<div style="font-size:9px;color:#fff;font-weight:600;'
+                        f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+                        f'{row["Symbol"]}</div>'
+                        f'<div style="font-size:10px;color:#fff;font-family:monospace">'
+                        f'{v:+.1f}%</div></div>')
+            st.markdown(
+                f'<div style="display:grid;grid-template-columns:repeat({cols},1fr);'
+                f'gap:3px;margin-bottom:12px">{cells}</div>',
+                unsafe_allow_html=True)
+
+        if hmap_mode == "Nifty 50 Stocks":
+            st.markdown('<div style="font-size:11px;color:#484F58;margin-bottom:4px">Nifty 50 stocks · % change</div>',
+                        unsafe_allow_html=True)
+            render_heatmap(heat, cols=10)
+        else:
+            st.markdown('<div style="font-size:11px;color:#484F58;margin-bottom:4px">Sector indices · % change</div>',
+                        unsafe_allow_html=True)
+            render_heatmap(sec_heat, cols=7)
+
         gc1,gc2=st.columns(2)
         with gc1:
-            st.markdown('<b style="color:#2EC4A0;font-size:13px">Top Gainers</b>', unsafe_allow_html=True)
+            st.markdown('<b style="color:#2EC4A0;font-size:13px">Top Gainers</b>',
+                        unsafe_allow_html=True)
             if not gl["gainers"].empty:
                 st.dataframe(gl["gainers"], width="stretch", hide_index=True, height=280,
                     column_config={"Chg %":st.column_config.NumberColumn(format="%.2f%%")})
         with gc2:
-            st.markdown('<b style="color:#F85149;font-size:13px">Top Losers</b>', unsafe_allow_html=True)
+            st.markdown('<b style="color:#F85149;font-size:13px">Top Losers</b>',
+                        unsafe_allow_html=True)
             if not gl["losers"].empty:
                 st.dataframe(gl["losers"], width="stretch", hide_index=True, height=280,
                     column_config={"Chg %":st.column_config.NumberColumn(format="%.2f%%")})

@@ -1,82 +1,98 @@
 """
-SuperSwarna — F&O Ban List + Possible Entrants (alternate to NSE direct).
-Strategy: NSE publishes a daily CSV of combined OI + MWPL for every F&O stock
-at a stable archive URL. We compute:
-  • Banned     : MWPL% >= 95  (in ban)
-  • Entrants   : 80 <= MWPL% < 95  (likely to enter ban)
-  • Exiting    : already banned but OI easing (best-effort)
-This CSV path is the same data brokers/mirror sites repackage, and is more
-reliable than NSE's cookie-gated JSON from cloud servers.
+Parabolic Trends — F&O Ban List + Possible Entrants
+Source: NSE Clearing daily CSV (nsearchives.nseindia.com/content/fo/fo_secban.csv)
+This is the exact same authoritative source used by all brokers and StockeZee.
+MWPL data from NSE combineoi CSV for possible entrants.
 """
 import streamlit as st
 import pandas as pd
 import requests
+from datetime import datetime, date
 from io import StringIO
-from datetime import datetime
 
-UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36")
+UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+HEADERS = {"User-Agent": UA, "Referer": "https://www.nseindia.com/"}
+
+BAN_CSV_URL     = "https://nsearchives.nseindia.com/content/fo/fo_secban.csv"
+MWPL_BASE_URL   = "https://nsearchives.nseindia.com/content/nsccl/combineoi_deleq_{}.csv"
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def fno_ban_mwpl() -> dict:
-    """
-    Pull combined OI / MWPL CSV and bucket by MWPL%.
-    Primary: NSE archive CSV (nsccl combineoi_deleq). Fallback: nsearchives.
-    """
-    out = {"banned": pd.DataFrame(), "entrants": pd.DataFrame(),
-           "asof": "", "source": ""}
-    today = datetime.now()
-    ddmmyyyy = today.strftime("%d%m%Y")
-
-    urls = [
-        f"https://nsearchives.nseindia.com/content/nsccl/combineoi_deleq_{ddmmyyyy}.csv",
-        f"https://archives.nseindia.com/content/nsccl/combineoi_deleq_{ddmmyyyy}.csv",
-    ]
-    sess = requests.Session()
-    sess.headers.update({"User-Agent": UA, "Accept": "*/*",
-                         "Referer": "https://www.nseindia.com/"})
+def _get_session() -> requests.Session:
+    s = requests.Session()
+    s.headers.update(HEADERS)
     try:
-        sess.get("https://www.nseindia.com", timeout=8)
+        s.get("https://www.nseindia.com", timeout=8)
+    except Exception:
+        pass
+    return s
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fno_ban_mwpl() -> dict:
+    out = {"banned": pd.DataFrame(), "entrants": pd.DataFrame(), "asof": ""}
+    s = _get_session()
+
+    # ── Ban list from NSE Clearing CSV ────────────────────────────────────────
+    try:
+        r = s.get(BAN_CSV_URL, timeout=12)
+        if r.status_code == 200 and len(r.text) > 10:
+            lines = [l.strip() for l in r.text.strip().split("\n") if l.strip()]
+            # Format: "Securities in Ban For Trade Date DD-MON-YYYY: 1,SYM1\n2,SYM2..."
+            # Or just: "SYM1\nSYM2" or comma-separated
+            banned_syms = []
+            trade_date  = ""
+            for line in lines:
+                if "ban" in line.lower() and "date" in line.lower():
+                    # Extract date
+                    import re
+                    m = re.search(r'\d{2}-[A-Z]{3}-\d{4}', line)
+                    if m:
+                        trade_date = m.group()
+                    continue
+                # Remove numbering like "1," or "2,"
+                parts = line.split(",")
+                for p in parts:
+                    sym = p.strip()
+                    if sym and not sym.isdigit() and len(sym) > 1:
+                        banned_syms.append(sym)
+            if banned_syms:
+                out["banned"] = pd.DataFrame({"Symbol": banned_syms, "Status": "IN BAN"})
+                out["asof"] = trade_date or date.today().strftime("%d %b %Y")
     except Exception:
         pass
 
-    raw = None
-    used = ""
-    for u in urls:
-        try:
-            r = sess.get(u, timeout=12)
-            if r.status_code == 200 and len(r.text) > 200:
-                raw = r.text
-                used = u
-                break
-        except Exception:
-            continue
-    if raw is None:
-        return out
-
+    # ── MWPL data for possible entrants ───────────────────────────────────────
     try:
-        # The combineoi file has a header row then data; columns vary, so parse flexibly
-        df = pd.read_csv(StringIO(raw))
-        df.columns = [str(c).strip() for c in df.columns]
-        # Identify symbol and MWPL% columns heuristically
-        sym_col = next((c for c in df.columns if c.lower() in
-                        ("symbol", "underlying", "scrip")), None)
-        pct_col = next((c for c in df.columns if "%" in c or "mwpl" in c.lower()
-                        or "limit" in c.lower()), None)
-        if sym_col is None or pct_col is None:
-            return out
-        df = df[[sym_col, pct_col]].copy()
-        df.columns = ["Symbol", "MWPL %"]
-        df["MWPL %"] = pd.to_numeric(df["MWPL %"], errors="coerce")
-        df = df.dropna()
-        banned = df[df["MWPL %"] >= 95].sort_values("MWPL %", ascending=False)
-        entrants = df[(df["MWPL %"] >= 80) & (df["MWPL %"] < 95)] \
-            .sort_values("MWPL %", ascending=False)
-        out["banned"] = banned.reset_index(drop=True)
-        out["entrants"] = entrants.reset_index(drop=True)
-        out["asof"] = today.strftime("%d %b %Y")
-        out["source"] = used
+        ddmmyyyy = date.today().strftime("%d%m%Y")
+        url = MWPL_BASE_URL.format(ddmmyyyy)
+        r = s.get(url, timeout=12)
+        if r.status_code == 200 and len(r.text) > 200:
+            df = pd.read_csv(StringIO(r.text))
+            df.columns = [c.strip() for c in df.columns]
+            # Find symbol and MWPL% columns flexibly
+            sym_col = next((c for c in df.columns if c.lower() in
+                           ("symbol","underlying","scrip","security")), None)
+            pct_col = next((c for c in df.columns if
+                           "%" in c or "mwpl" in c.lower() or "limit" in c.lower()), None)
+            if sym_col and pct_col:
+                df = df[[sym_col, pct_col]].copy()
+                df.columns = ["Symbol", "MWPL %"]
+                df["MWPL %"] = pd.to_numeric(df["MWPL %"], errors="coerce")
+                df = df.dropna()
+                entrants = df[(df["MWPL %"] >= 80) & (df["MWPL %"] < 95)]\
+                    .sort_values("MWPL %", ascending=False).reset_index(drop=True)
+                out["entrants"] = entrants
+                if not out["asof"]:
+                    out["asof"] = date.today().strftime("%d %b %Y")
     except Exception:
-        return out
+        pass
+
+    # If ban list is empty, check if it's a trading day
+    if out["banned"].empty and not out["asof"]:
+        today = date.today()
+        if today.weekday() >= 5:  # Saturday/Sunday
+            out["asof"] = "Weekend — no trading"
+        else:
+            out["asof"] = date.today().strftime("%d %b %Y")
+
     return out

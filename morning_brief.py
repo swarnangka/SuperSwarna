@@ -142,12 +142,13 @@ def fetch_top_news(max_items: int = 3) -> list:
 
 
 @st.cache_data(ttl=43200, show_spinner=False)
-def generate_synthesis(global_pulse: dict, recap: dict,
-                       levels: dict, news: list) -> str:
-    """Call Claude API once per 6AM cache window to write the morning note."""
+def generate_synthesis(global_pulse: dict, recap: dict, levels: dict,
+                       news: list, sectors: dict = None,
+                       events: list = None, results: list = None,
+                       movers: dict = None) -> str:
+    """Call Claude API once at 6AM IST. Cached all day. Never re-called."""
     try:
         import anthropic, os
-        # Resolve API key — try every possible location robustly
         api_key = None
         try:
             api_key = st.secrets["ANTHROPIC_API_KEY"]
@@ -170,51 +171,92 @@ def generate_synthesis(global_pulse: dict, recap: dict,
                     "In Streamlit: Settings → Secrets → add exactly:\n"
                     "ANTHROPIC_API_KEY = \"sk-ant-api03-...\"")
         if not str(api_key).startswith("sk-"):
-            return f"Morning brief unavailable — API key looks wrong (starts with '{str(api_key)[:8]}...'). Check Streamlit Secrets."
-        # Build a tight data summary for the prompt
-        dxy = global_pulse.get("DXY", {})
-        crude = global_pulse.get("Crude", {})
-        gold = global_pulse.get("Gold", {})
-        dow = global_pulse.get("Dow", {})
-        nifty = recap.get("Nifty 50", {})
-        bnk = recap.get("Bank Nifty", {})
-        nifty_lvl = levels.get("Nifty 50", {})
+            return (f"Morning brief unavailable — API key looks wrong "
+                    f"(starts with '{str(api_key)[:8]}...'). Check Streamlit Secrets.")
 
         def fv(v, fmt=".2f"):
             if v is None: return "N/A"
             try: return f"{v:{fmt}}"
             except: return str(v)
 
+        dxy   = global_pulse.get("DXY", {})
+        crude = global_pulse.get("Crude", {})
+        gold  = global_pulse.get("Gold", {})
+        dow   = global_pulse.get("Dow", {})
+        nifty = recap.get("Nifty 50", {})
+        bnk   = recap.get("Bank Nifty", {})
+        nifty_lvl = levels.get("Nifty 50", {})
+
+        # Sector strength/weakness
+        sector_str = "Not available"
+        if sectors:
+            strong = [f"{k} ({v:+.1f}%)" for k,v in sectors.items() if v > 0][:3]
+            weak   = [f"{k} ({v:+.1f}%)" for k,v in sectors.items() if v < 0][:3]
+            sector_str = (f"Strong: {', '.join(strong) if strong else 'none'}. "
+                         f"Weak: {', '.join(weak) if weak else 'none'}.")
+
+        # Top movers
+        movers_str = "Not available"
+        if movers:
+            gainers = movers.get("gainers", [])[:3]
+            losers  = movers.get("losers", [])[:3]
+            movers_str = (f"Top gainers: {', '.join(gainers) if gainers else 'none'}. "
+                         f"Top losers: {', '.join(losers) if losers else 'none'}.")
+
+        # Events today
+        events_str = "No major events today."
+        if events:
+            events_str = "; ".join(events)
+
+        # Results today
+        results_str = "No results due today."
+        if results:
+            results_str = "; ".join(results[:5])
+
         data_block = f"""
-DXY: {fv(dxy.get('last'))} ({fv(dxy.get('chg'),'+.2f')}% vs prev)
+GLOBAL CUES:
+DXY: {fv(dxy.get('last'))} ({fv(dxy.get('chg'),'+.2f')}%)
 Crude: ${fv(crude.get('last'))} ({fv(crude.get('chg'),'+.2f')}%)
 Gold: ${fv(gold.get('last'))} ({fv(gold.get('chg'),'+.2f')}%)
-Dow: {fv(dow.get('chg'),'+.2f')}%
-Nifty yesterday: O={fv(nifty.get('open'))} H={fv(nifty.get('high'))} L={fv(nifty.get('low'))} C={fv(nifty.get('close'))} ({fv(nifty.get('chg'),'+.2f')}%)
-Bank Nifty yesterday: C={fv(bnk.get('close'))} ({fv(bnk.get('chg'),'+.2f')}%)
-Nifty key levels: S2={nifty_lvl.get('S2','N/A')} S1/Bias={nifty_lvl.get('S1','N/A')} R1={nifty_lvl.get('R1','N/A')} R2={nifty_lvl.get('R2','N/A')}
-Top headlines: {'; '.join(news) if news else 'None'}
+Dow Jones: {fv(dow.get('chg'),'+.2f')}%
+Headlines: {'; '.join(news) if news else 'None'}
+
+INDIAN MARKET (yesterday):
+Nifty: O={fv(nifty.get('open'))} H={fv(nifty.get('high'))} L={fv(nifty.get('low'))} C={fv(nifty.get('close'))} ({fv(nifty.get('chg'),'+.2f')}%)
+Bank Nifty: C={fv(bnk.get('close'))} ({fv(bnk.get('chg'),'+.2f')}%)
+Key levels: S2={nifty_lvl.get('S2','N/A')} S1={nifty_lvl.get('S1','N/A')} R1={nifty_lvl.get('R1','N/A')} R2={nifty_lvl.get('R2','N/A')}
+
+SECTORS (yesterday):
+{sector_str}
+
+MOVERS (yesterday):
+{movers_str}
+
+TODAY'S EVENTS: {events_str}
+TODAY'S RESULTS: {results_str}
 """
-        system = """You write a morning market brief for Indian equity traders.
-Style rules — follow strictly:
-- 3 short paragraphs, 50-60 words each, no more
-- First paragraph: global cues and their implication for India
-- Second paragraph: Nifty/BankNifty structure, key level to watch today
-- Third paragraph: playbook — what to do, what to avoid, where to focus
-- Tone: direct, declarative, confident. Like a senior trader wrote it at 5:45 AM
-- No bullet points. No emoji. No hedging language. No "it appears" or "it seems"
-- Do not mention that you are an AI. Write as a human desk note
-- Specific levels must appear as numbers, not words
-- Start directly with the content — no title, no date header"""
+
+        system = """You write a morning market brief for Indian equity traders. 4 tight paragraphs.
+
+Para 1 — Global cues: DXY/crude/gold direction and what it means for India today. 40-50 words.
+Para 2 — Index structure: Nifty/BankNifty key level to hold or break today. Be specific with numbers. 40-50 words.
+Para 3 — Sectors and movers: which sectors showing strength or weakness, any stocks to watch. If results are due, name them. If no events or results, explicitly say so. 40-50 words.
+Para 4 — Playbook: one clear action bias for the session. What to do, what to avoid. 30-40 words.
+
+Rules:
+- Direct, declarative, confident. Like a senior trader wrote this at 5:45 AM.
+- No bullets. No emoji. No hedging. No "it appears" or "it seems" or "it is worth noting".
+- Do not mention being an AI.
+- Specific numbers must appear as digits, not words.
+- Start directly — no title, no date, no greeting."""
 
         client = anthropic.Anthropic(api_key=api_key)
         msg = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=400,
+            max_tokens=500,
             system=system,
             messages=[{"role": "user",
-                       "content": f"Write today's morning brief using this data:\n{data_block}"}]
-        )
+                       "content": f"Write today's morning brief:\n{data_block}"}])
         return msg.content[0].text.strip()
     except Exception as e:
-        return f"Morning brief unavailable — {str(e)[:60]}"
+        return f"Morning brief error — {str(e)[:80]}"
