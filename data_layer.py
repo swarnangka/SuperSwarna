@@ -23,7 +23,7 @@ INDEX_TOKENS = {
 }
 
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(ttl=3000, show_spinner=False)  # re-auth every 50 min (token valid ~60 min)
 def get_session():
     if not SMARTAPI_AVAILABLE:
         return None

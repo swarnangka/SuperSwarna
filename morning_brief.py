@@ -31,7 +31,7 @@ GLOBAL_SYMBOLS = {
 INDEX_SYMBOLS = {
     "Nifty 50":   "^NSEI",
     "Bank Nifty": "^NSEBANK",
-    "Midcap":     "^NSEMDCP150",
+    "Midcap":     "NIFTY_MIDCAP_100.NS",
 }
 
 
@@ -146,7 +146,20 @@ def generate_synthesis(global_pulse: dict, recap: dict,
                        levels: dict, news: list) -> str:
     """Call Claude API once per 6AM cache window to write the morning note."""
     try:
-        import anthropic
+        import anthropic, os
+        # Resolve API key from Streamlit secrets or environment
+        api_key = None
+        try:
+            api_key = (st.secrets.get("ANTHROPIC_API_KEY")
+                       or st.secrets.get("anthropic_api_key")
+                       or (st.secrets.get("anthropic") or {}).get("api_key"))
+        except Exception:
+            pass
+        if not api_key:
+            api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            return ("Morning brief unavailable — add ANTHROPIC_API_KEY to "
+                    "Streamlit Secrets (Settings → Secrets → ANTHROPIC_API_KEY = \"sk-ant-...\")")
         # Build a tight data summary for the prompt
         dxy = global_pulse.get("DXY", {})
         crude = global_pulse.get("Crude", {})
@@ -156,14 +169,19 @@ def generate_synthesis(global_pulse: dict, recap: dict,
         bnk = recap.get("Bank Nifty", {})
         nifty_lvl = levels.get("Nifty 50", {})
 
+        def fv(v, fmt=".2f"):
+            if v is None: return "N/A"
+            try: return f"{v:{fmt}}"
+            except: return str(v)
+
         data_block = f"""
-DXY: {dxy.get('last','N/A')} ({dxy.get('chg','N/A'):+.2f}% vs prev)
-Crude: ${crude.get('last','N/A')} ({crude.get('chg','N/A'):+.2f}%)
-Gold: ${gold.get('last','N/A')} ({gold.get('chg','N/A'):+.2f}%)
-Dow: {dow.get('chg','N/A'):+.2f}%
-Nifty yesterday: O={nifty.get('open','N/A')} H={nifty.get('high','N/A')} L={nifty.get('low','N/A')} C={nifty.get('close','N/A')} ({nifty.get('chg','N/A'):+.2f}%)
-Bank Nifty yesterday: C={bnk.get('close','N/A')} ({bnk.get('chg','N/A'):+.2f}%)
-Nifty key levels: S2={nifty_lvl.get('S2')} S1/Bias={nifty_lvl.get('S1')} R1={nifty_lvl.get('R1')} R2={nifty_lvl.get('R2')}
+DXY: {fv(dxy.get('last'))} ({fv(dxy.get('chg'),'+.2f')}% vs prev)
+Crude: ${fv(crude.get('last'))} ({fv(crude.get('chg'),'+.2f')}%)
+Gold: ${fv(gold.get('last'))} ({fv(gold.get('chg'),'+.2f')}%)
+Dow: {fv(dow.get('chg'),'+.2f')}%
+Nifty yesterday: O={fv(nifty.get('open'))} H={fv(nifty.get('high'))} L={fv(nifty.get('low'))} C={fv(nifty.get('close'))} ({fv(nifty.get('chg'),'+.2f')}%)
+Bank Nifty yesterday: C={fv(bnk.get('close'))} ({fv(bnk.get('chg'),'+.2f')}%)
+Nifty key levels: S2={nifty_lvl.get('S2','N/A')} S1/Bias={nifty_lvl.get('S1','N/A')} R1={nifty_lvl.get('R1','N/A')} R2={nifty_lvl.get('R2','N/A')}
 Top headlines: {'; '.join(news) if news else 'None'}
 """
         system = """You write a morning market brief for Indian equity traders.
@@ -178,7 +196,7 @@ Style rules — follow strictly:
 - Specific levels must appear as numbers, not words
 - Start directly with the content — no title, no date header"""
 
-        client = anthropic.Anthropic()
+        client = anthropic.Anthropic(api_key=api_key)
         msg = client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=400,
