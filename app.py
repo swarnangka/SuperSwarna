@@ -266,12 +266,12 @@ def build_tape_html(items: list, speed_class: str = "fast") -> str:
                  f'</span>')
     if not seg:
         return ""
-    return (f'<div class="tape-inner {speed_class}">{seg}{seg}</div>')
+    return f'<div class="tape-inner {speed_class}">{seg}{seg}</div>'
 
 
 def build_scan_tape_html(items: list, speed_class: str = "med") -> str:
     if not items:
-        return '<span style="color:var(--txt3);font-size:12px;padding:0 12px">Scan unavailable</span>'
+        return '<span style="color:var(--txt3);font-size:12px;padding:0 12px">Scan unavailable — market may be closed or Chartink unreachable</span>'
     seg = ""
     for it in items:
         chg = it.get("chg", 0)
@@ -285,7 +285,27 @@ def build_scan_tape_html(items: list, speed_class: str = "med") -> str:
     return f'<div class="tape-inner {speed_class}">{seg}{seg}</div>'
 
 
-# ══ RENDER TAPES ══════════════════════════════════════════════════════════════
+# ══ HEADER (brand name first, then tickers) ══════════════════════════════════
+live = connected()
+conn = ('<span class="conn-live">● LIVE</span>' if live
+        else '<span class="conn-off">● DELAYED</span>')
+st.markdown(
+    f'<div class="topbar">'
+    f'<span class="brand">Parabolic<em>Trends</em></span>'
+    f'<div class="hdr-right">{conn}'
+    f'<span class="clock">{ist_now().strftime("%d %b %Y · %H:%M")} IST</span>'
+    f'</div></div>',
+    unsafe_allow_html=True)
+
+# Global Refresh button
+r_col1, r_col2 = st.columns([8,1])
+with r_col2:
+    st.markdown('<div class="refresh-btn">', unsafe_allow_html=True)
+    if st.button("↺ Refresh", key="global_refresh"):
+        _clear_all()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ══ TICKERS (after header) ════════════════════════════════════════════════════
 # Global markets tape
 g_items = global_ticker_data()
 g_html  = build_tape_html(g_items, "fast")
@@ -293,43 +313,27 @@ st.markdown(
     f'<div class="tape-wrap tape-global">{g_html}</div>',
     unsafe_allow_html=True)
 
-# Scan tapes (52W, MM, DWM RSI, ATR)
+# Scan tapes — 52WH, MM, ATR only (badge sits outside scroll area)
 BADGE_COLORS = {
-    "52W":     ("#7C5CFC","#161B22"),
-    "MM":      ("#2EC4A0","#0D1117"),
-    "DWM RSI": ("#D29922","#0D1117"),
-    "ATR":     ("#F85149","#161B22"),
+    "52WH": ("#7C5CFC", "#fff"),
+    "MM":   ("#2EC4A0", "#0D1117"),
+    "ATR":  ("#F85149", "#fff"),
 }
-for tape_label, tape_slug in TAPE_SCANS.items():
-    tape_items = fetch_tape_scan(tape_label, tape_slug)
+for tape_label, info in TAPE_SCANS.items():
+    tape_items = fetch_tape_scan(tape_label)
     tape_html  = build_scan_tape_html(tape_items, "med")
     bg, fg = BADGE_COLORS.get(tape_label, ("#484F58","#fff"))
+    # Badge is OUTSIDE the overflow:hidden div so it never gets covered
     st.markdown(
-        f'<div class="tape-wrap" style="background:var(--bg);padding:2px 0 1px">'
-        f'<div class="tape-row">'
-        f'<span class="tape-badge" style="background:{bg};color:{fg}">{tape_label}</span>'
-        f'{tape_html}'
+        f'<div style="display:flex;align-items:center;'
+        f'border-bottom:1px solid var(--border);background:var(--bg);'
+        f'padding:3px 0">'
+        f'<span class="tape-badge" style="background:{bg};color:{fg};'
+        f'flex-shrink:0;margin:0 8px">{tape_label}</span>'
+        f'<div style="overflow:hidden;flex:1">'
+        f'<div style="display:flex">{tape_html}</div>'
         f'</div></div>',
         unsafe_allow_html=True)
-
-# ══ HEADER ════════════════════════════════════════════════════════════════════
-live = connected()
-conn = ('<span class="conn-live">● LIVE</span>' if live
-        else '<span class="conn-off">● DELAYED</span>')
-hdr_left  = (f'<span class="brand">Parabolic<em>Trends</em></span>')
-hdr_right = (f'<div class="hdr-right">{conn}'
-             f'<span class="clock">{ist_now().strftime("%d %b %Y · %H:%M")} IST</span>'
-             f'</div>')
-st.markdown(f'<div class="topbar">{hdr_left}{hdr_right}</div>',
-            unsafe_allow_html=True)
-
-# Global Refresh button — top right
-r_col1, r_col2 = st.columns([8,1])
-with r_col2:
-    st.markdown('<div class="refresh-btn">', unsafe_allow_html=True)
-    if st.button("↺ Refresh", key="global_refresh"):
-        _clear_all()
-    st.markdown('</div>', unsafe_allow_html=True)
 
 # ══ SECTION 1 — RISK INDICATOR ════════════════════════════════════════════════
 st.markdown('<div class="sec"><span class="sec-title">Risk Indicator</span>'
