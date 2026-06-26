@@ -25,7 +25,10 @@ def _download_ohlcv(symbol: str, interval: str) -> pd.DataFrame:
         if df is None or df.empty:
             return pd.DataFrame()
         df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-        return df[["Open","High","Low","Close","Volume"]].dropna()
+        df = df[["Open","High","Low","Close","Volume"]].dropna()
+        # Remove duplicate index entries (known yfinance issue with CME futures)
+        df = df[~df.index.duplicated(keep="last")]
+        return df.sort_index()
     except Exception:
         return pd.DataFrame()
 

@@ -56,31 +56,45 @@ def _risk_level(score: float) -> tuple:
 def _supertrend_since(df: pd.DataFrame) -> tuple:
     """
     Scan backwards to find when current Supertrend direction started.
-    Returns (direction_str, date_str, bars_ago, price_at_signal)
+    Returns (direction_str, date_str, calendar_days_ago, price_at_signal)
+    Uses CALENDAR DAYS (not trading bar count) for elapsed time.
     """
     if df.empty or "ST_dir" not in df.columns or len(df) < 3:
         return "—", "—", 0, None
-    dirs = df["ST_dir"].values
-    closes = df["Close"].values
-    dates = df.index
+
+    dirs    = df["ST_dir"].values
+    closes  = df["Close"].values
+    dates   = df.index
+
     current_dir = int(dirs[-1])
-    # Walk backwards to find the flip point
-    flip_idx = len(dirs) - 1
+
+    # Walk backwards to find the last flip
+    flip_idx = 0
     for i in range(len(dirs) - 2, -1, -1):
         if int(dirs[i]) != current_dir:
             flip_idx = i + 1
             break
-        if i == 0:
-            flip_idx = 0
-    direction = "BUY" if current_dir == 1 else "SELL"
-    flip_date = dates[flip_idx]
+
+    direction  = "BUY" if current_dir == 1 else "SELL"
+    flip_date  = dates[flip_idx]
     flip_price = float(closes[flip_idx])
-    bars_ago = len(dirs) - 1 - flip_idx
+
     try:
-        date_str = flip_date.strftime("%d %b")
+        date_str = flip_date.strftime("%d %b %Y")
+        # Calendar days from signal to today (IST)
+        from datetime import timezone as _tz, timedelta as _td
+        IST = _tz(_td(hours=5, minutes=30))
+        today_ist = datetime.now(IST).date()
+        if hasattr(flip_date, "date"):
+            flip_d = flip_date.date()
+        else:
+            flip_d = flip_date
+        cal_days = (today_ist - flip_d).days
     except Exception:
         date_str = str(flip_date)[:10]
-    return direction, date_str, bars_ago, flip_price
+        cal_days = 0
+
+    return direction, date_str, cal_days, flip_price
 
 
 def get_index_history(index_name: str) -> pd.DataFrame:
@@ -104,7 +118,7 @@ def index_risk(index_name: str) -> dict:
                 "st_since": "—", "st_date": "—", "st_bars": 0, "st_price": None,
                 "conditions_met": 0, "total_conditions": 7, "pct_200": 0}
 
-    df = supertrend(df, 10, 3.0)
+    df = supertrend(df, 10, 2.0)   # factor=2.0 matches TradingView 'Supertrend 10 hl2 2'
     r = df.iloc[-1]
     price  = float(r["Close"])
     ma50   = float(r["MA50"])

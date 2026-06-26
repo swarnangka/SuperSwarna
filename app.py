@@ -510,10 +510,15 @@ for i, idx in enumerate(INDEX_TOKENS.keys()):
         score_pct=score/maxs*100
         st_on=rk["supertrend"]
         st_c="on" if st_on else "off"; st_t="BUY" if st_on else "SELL"
-        st_date=rk.get("st_date","—"); st_bars=rk.get("st_bars",0)
+        st_date=rk.get("st_date","—"); st_cal=rk.get("st_bars",0)
         st_price=rk.get("st_price",None)
+        # Show calendar days elapsed, not bar count
+        if st_cal > 0:
+            elapsed_str = f"{st_cal}d ago"
+        else:
+            elapsed_str = ""
         st_since_str=(f"{st_t} since {st_date}"
-                      +(f" · {st_bars}d ago" if st_bars>0 else "")
+                      +(f" · {elapsed_str}" if elapsed_str else "")
                       +(f" @ {st_price:,.0f}" if st_price else ""))
         met=rk.get("conditions_met",0); tot=rk.get("total_conditions",7)
         pct200=rk.get("pct_200",0) or 0

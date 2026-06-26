@@ -171,30 +171,74 @@ def add_mas(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def supertrend(df: pd.DataFrame, period: int = 10,
-               factor: float = 3.0) -> pd.DataFrame:
+               factor: float = 2.0) -> pd.DataFrame:
+    """
+    TradingView-accurate Supertrend.
+    ATR = Wilder RMA of True Range (not simple H-L mean).
+    True Range = max(H-L, |H-prevC|, |L-prevC|)
+    Wilder RMA = EWM with alpha=1/period, adjust=False.
+    Default factor=2.0 matches TradingView 'Supertrend 10 hl2 2' setting.
+    """
     if df.empty or len(df) < period + 1:
         return df
     df = df.copy()
-    hl2  = (df["High"] + df["Low"]) / 2
-    atr  = (df["High"] - df["Low"]).rolling(period).mean()
-    up   = hl2 - factor * atr
-    dn   = hl2 + factor * atr
-    st   = pd.Series(index=df.index, dtype=float)
-    dir_ = pd.Series(index=df.index, dtype=int)
+
+    # True Range — correctly includes gap component
+    prev_close = df["Close"].shift(1)
+    tr = pd.concat([
+        df["High"] - df["Low"],
+        (df["High"] - prev_close).abs(),
+        (df["Low"]  - prev_close).abs(),
+    ], axis=1).max(axis=1)
+
+    # Wilder's RMA (same as TradingView's ta.rma)
+    atr = tr.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
+
+    hl2 = (df["High"] + df["Low"]) / 2
+
+    # Basic upper (support) and lower (resistance) bands
+    basic_upper = hl2 - factor * atr
+    basic_lower = hl2 + factor * atr
+
+    final_upper = pd.Series(np.nan, index=df.index, dtype=float)
+    final_lower = pd.Series(np.nan, index=df.index, dtype=float)
+    direction   = pd.Series(np.nan, index=df.index, dtype=float)
+
+    closes = df["Close"].values.copy()
+    bu = basic_upper.values.copy()
+    bl = basic_lower.values.copy()
+    fu = np.full(len(df), np.nan)
+    fl = np.full(len(df), np.nan)
+    di = np.full(len(df), np.nan)
+
     for i in range(len(df)):
-        if i < period:
-            st.iloc[i] = up.iloc[i]; dir_.iloc[i] = 1; continue
-        prev_st  = st.iloc[i-1]
-        prev_dir = dir_.iloc[i-1]
-        curr_up  = up.iloc[i]; curr_dn = dn.iloc[i]
-        curr_up  = max(curr_up, up.iloc[i-1]) if df["Close"].iloc[i-1] > up.iloc[i-1] else curr_up
-        curr_dn  = min(curr_dn, dn.iloc[i-1]) if df["Close"].iloc[i-1] < dn.iloc[i-1] else curr_dn
-        if prev_dir == 1:
-            dir_.iloc[i] = 1 if df["Close"].iloc[i] >= curr_up else -1
+        if np.isnan(atr.iloc[i]) or i == 0:
+            fu[i] = bu[i] if not np.isnan(bu[i]) else 0.0
+            fl[i] = bl[i] if not np.isnan(bl[i]) else 0.0
+            di[i] = 1.0
+            continue
+
+        # Final upper band: only raise (tighten) if prev close was above it
+        fu[i] = bu[i] if (bu[i] > fu[i-1] or closes[i-1] < fu[i-1]) else fu[i-1]
+        # Final lower band: only lower (tighten) if prev close was below it
+        fl[i] = bl[i] if (bl[i] < fl[i-1] or closes[i-1] > fl[i-1]) else fl[i-1]
+
+        # Direction
+        if di[i-1] == -1:
+            di[i] = 1.0 if closes[i] > fl[i] else -1.0
         else:
-            dir_.iloc[i] = -1 if df["Close"].iloc[i] <= curr_dn else 1
-        st.iloc[i] = curr_up if dir_.iloc[i] == 1 else curr_dn
-    df["ST"] = st; df["ST_dir"] = dir_
+            di[i] = -1.0 if closes[i] < fu[i] else 1.0
+
+    final_upper[:] = fu
+    final_lower[:] = fl
+    direction[:]   = di
+
+    # ST value = support when bullish, resistance when bearish
+    st = pd.Series(np.where(direction == 1, final_upper, final_lower),
+                   index=df.index)
+
+    df["ST"]     = st
+    df["ST_dir"] = direction.astype(int)
     return df
 
 def rsi(series: pd.Series, period: int = 14) -> float:
