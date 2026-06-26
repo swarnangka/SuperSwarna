@@ -144,7 +144,6 @@ def fetch_top_news(max_items: int = 3) -> list:
     return items[:max_items]
 
 
-@st.cache_data(ttl=43200, show_spinner=False)
 def generate_synthesis(global_pulse: dict, recap: dict, levels: dict,
                        news: list, sectors: dict = None,
                        events: list = None, results: list = None,

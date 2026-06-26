@@ -6,7 +6,31 @@ Uses parallel fetch from data_layer.
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from data_layer import fetch_yf_parallel
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def _fetch_yf_parallel(symbols: dict, period: str = "2d", max_workers: int = 8) -> dict:
+    def _one(name, sym):
+        try:
+            df = yf.download(sym, period=period, auto_adjust=True, progress=False, timeout=8)
+            if df is None or df.empty: return name, None
+            df.columns = [c[0] if isinstance(c,tuple) else c for c in df.columns]
+            df = df.dropna()
+            if len(df) < 2: return name, None
+            last = float(df["Close"].iloc[-1]); prev = float(df["Close"].iloc[-2])
+            return name, {"last": round(last,4), "chg": round((last-prev)/prev*100,4)}
+        except Exception:
+            return name, None
+    results = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_one, n, s): n for n,s in symbols.items()}
+        for fut in as_completed(futures, timeout=15):
+            try:
+                n, v = fut.result(); results[n] = v
+            except Exception:
+                results[futures[fut]] = None
+    for n in symbols:
+        if n not in results: results[n] = None
+    return results
 
 NIFTY50_SYMS = {
     "RELIANCE":"RELIANCE.NS","TCS":"TCS.NS","HDFCBANK":"HDFCBANK.NS",
@@ -49,22 +73,10 @@ SECTOR_SYMS = {
 }
 
 
-def nifty50() -> pd.DataFrame:
-    return pd.DataFrame()  # placeholder
-
-
-def advance_decline(df: pd.DataFrame) -> dict:
-    if df.empty:
-        return {"adv": 0, "dec": 0, "total": 0}
-    adv = int((df["Chg %"] > 0).sum()) if "Chg %" in df.columns else 0
-    dec = int((df["Chg %"] < 0).sum()) if "Chg %" in df.columns else 0
-    return {"adv": adv, "dec": dec, "total": adv + dec}
-
-
 @st.cache_data(ttl=900, show_spinner=False)
 def nifty50_heatmap_yf() -> pd.DataFrame:
     """Fetch Nifty 50 stocks in parallel — 900s cache."""
-    results = fetch_yf_parallel(NIFTY50_SYMS, period="2d", max_workers=12)
+    results = _fetch_yf_parallel(NIFTY50_SYMS, period="2d", max_workers=12)
     rows = []
     for name, val in results.items():
         if val:
@@ -75,7 +87,7 @@ def nifty50_heatmap_yf() -> pd.DataFrame:
 @st.cache_data(ttl=900, show_spinner=False)
 def sector_heatmap_yf() -> pd.DataFrame:
     """Fetch sector indices in parallel — 900s cache."""
-    results = fetch_yf_parallel(SECTOR_SYMS, period="2d", max_workers=8)
+    results = _fetch_yf_parallel(SECTOR_SYMS, period="2d", max_workers=8)
     rows = []
     for name in SECTOR_SYMS:  # preserve order
         val = results.get(name)
