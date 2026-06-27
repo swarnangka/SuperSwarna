@@ -238,6 +238,26 @@ def us_index_risk(index_name: str) -> dict:
     return df if not df.empty else df_yf, "Unknown"
 
 
+def get_index_history(index_name: str) -> tuple:
+    """
+    Fetch daily OHLCV for an Indian index.
+    Returns (DataFrame, data_source_str).
+    Angel One preferred; yfinance 1y fallback.
+    """
+    info = INDEX_TOKENS[index_name]
+    df = get_candles(info["token"], info["exchange"], "ONE_DAY", days=400)
+    if not df.empty and len(df) > 50:
+        from datetime import timezone, timedelta, datetime as _dt
+        _IST = timezone(timedelta(hours=5, minutes=30))
+        days_old = (_dt.now(_IST).date() - pd.Timestamp(df.index[-1]).date()).days
+        if days_old <= 5:
+            return df, "Angel One"
+    df_yf = fetch_yf(info["yf"], period="1y")
+    if not df_yf.empty:
+        return df_yf, "Yahoo Finance"
+    return df if not df.empty else df_yf, "Unknown"
+
+
 def index_risk(index_name: str) -> dict:
     """
     Swarna weighted risk score (out of 11) + Supertrend direction + signal date.
