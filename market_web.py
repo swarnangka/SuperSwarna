@@ -125,7 +125,7 @@ def nifty50_heatmap_yf() -> tuple:
     Returns (DataFrame, source_label).
     Tries live fetch first. Falls back to file cache if live returns empty.
     """
-    results = _fetch_parallel(NIFTY50_SYMS, period="2d", max_workers=12)
+    results = _fetch_parallel(NIFTY50_SYMS, period="5d", max_workers=12)
     rows = []
     for name in NIFTY50_SYMS:
         val = results.get(name)
@@ -147,7 +147,7 @@ def nifty50_heatmap_yf() -> tuple:
 @st.cache_data(ttl=900, show_spinner=False)
 def sector_heatmap_yf() -> tuple:
     """Returns (DataFrame, source_label). Same persistence pattern."""
-    results = _fetch_parallel(SECTOR_SYMS, period="2d", max_workers=8)
+    results = _fetch_parallel(SECTOR_SYMS, period="5d", max_workers=8)
     rows = []
     for name in SECTOR_SYMS:
         val = results.get(name)
